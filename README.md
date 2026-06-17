@@ -230,12 +230,8 @@ blocks by scanning the markdown.
    "return only translated text" rule and demands both `## English` and
    `## 繁體中文 (zh-TW)` sections, so zh-TW is no longer skipped when the
    source is already English.
-9. **Moved features into a Configure window** — the translator window now
-   shows a read-only features summary plus a **⚙ Configure features…**
-   button that opens a dedicated checkbox window; **Save** applies the
-   selection, persists it, and re-translates.
 9. **Combined picker + result into one live window** —
-   `ShowTranslatorWindow`: source panel, 2-column feature checkboxes,
+   `ShowTranslatorWindow`: source panel, feature checkboxes,
    model dropdown, status line, result panel, Copy/Re-translate/Close.
    Any toggle or model change triggers a 700 ms debounced re-translate;
    result panel and clipboard update in place.
@@ -244,3 +240,7 @@ blocks by scanning the markdown.
     alternates.
 11. **Auto-start on login** — Startup-folder shortcut via the PowerShell
     snippet above.
+12. **Moved features into a Configure window** — the translator window now
+    shows a read-only features summary plus a **⚙ Configure features…**
+    button that opens a dedicated checkbox window; **Save** applies the
+    selection, persists it, and re-translates.

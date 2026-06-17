@@ -13,7 +13,7 @@
     Empty string means Core-only (translate to English).
 
 .PARAMETER Model
-    Model id passed to `gh models run`. Default: openai/gpt-4o-mini.
+    Model id passed to `gh models run`. Default: openai/gpt-4.1-mini.
 
 .PARAMETER InputFile
     UTF-8 file containing the clipboard text to translate.
@@ -28,7 +28,7 @@
 [CmdletBinding()]
 param(
     [string]$Features = "",
-    [string]$Model = "openai/gpt-4o-mini",
+    [string]$Model = "openai/gpt-4.1-mini",
     [Parameter(Mandatory)][string]$InputFile,
     [Parameter(Mandatory)][string]$OutputFile,
     [switch]$DryRun
