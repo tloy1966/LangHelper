@@ -230,44 +230,80 @@ ShowTranslatorWindow(sourceText, autoRun) {
         }
     }
 
-    g := Gui("+Resize", "LangHelper")
-    g.SetFont("s10", "Segoe UI")
-    g.MarginX := 12, g.MarginY := 12
-
-    g.Add("Text", "xm", "Live input (type Chinese or English here):")
-    inputEdit := g.Add("Edit", "xm y+4 w820 h100 +Wrap", sourceText)
-
-    g.Add("Text", "xm y+10", "Clipboard snapshot:")
-    snapshotEdit := g.Add("Edit", "xm y+4 w820 h70 ReadOnly +Wrap", sourceText)
-
-    ; --- Feature configuration (opens separate window) -----------------------
     selectedFeatures := Settings["Features"]
-
-    g.Add("Text", "xm y+12", "Features:")
-    featuresLabel := g.Add("Text", "x+8 yp w640", FormatFeatures(selectedFeatures))
-    cfgBtn := g.Add("Button", "xm y+6 w200", "⚙ Configure features…")
-
-    g.Add("Text", "xm y+14 Section", "Model:")
     chooseIdx := 1
     Loop ModelCatalog.Length
         if (ModelCatalog[A_Index] = Settings["Model"]) {
             chooseIdx := A_Index
             break
         }
-    ddModel := g.Add("DropDownList", "x+8 yp-3 w340 Choose" chooseIdx, ModelCatalog)
 
-    statusText := g.Add("Text", "xm y+14 w820", "Ready.")
-    g.Add("Text", "xm y+6", "Result (auto-copied to clipboard when done):")
+    g := Gui("+Resize", "LangHelper")
+    g.BackColor := "F4F5F7"
+    g.SetFont("s10", "Segoe UI")
+    g.MarginX := 16, g.MarginY := 14
+
+    ; --- Header --------------------------------------------------------------
+    g.SetFont("s15 Bold", "Segoe UI")
+    g.Add("Text", "xm c1F2937 BackgroundTrans", "LangHelper")
+    g.SetFont("s9 Norm", "Segoe UI")
+    g.Add("Text", "xm y+2 c6B7280 BackgroundTrans", "Live clipboard translator · edits re-translate automatically")
+
+    ; --- Input ---------------------------------------------------------------
+    g.SetFont("s10 Bold", "Segoe UI")
+    g.Add("Text", "xm y+14 c374151 BackgroundTrans", "Input")
+    g.SetFont("s9 Norm", "Segoe UI")
+    charCount := g.Add("Text", "xm yp w820 r1 c9CA3AF Right BackgroundTrans", StrLen(sourceText) " chars")
+    g.SetFont("s10 Norm", "Segoe UI")
+    inputEdit := g.Add("Edit", "xm y+4 w820 h110 +Wrap", sourceText)
+
+    ; --- Original clipboard snapshot (de-emphasized) -------------------------
+    g.SetFont("s9 Norm", "Segoe UI")
+    g.Add("Text", "xm y+10 c9CA3AF BackgroundTrans", "Original clipboard snapshot")
+    snapshotEdit := g.Add("Edit", "xm y+3 w820 h52 ReadOnly +Wrap c6B7280", sourceText)
+
+    ; --- Features ------------------------------------------------------------
+    g.SetFont("s10 Bold", "Segoe UI")
+    g.Add("Text", "xm y+12 c374151 BackgroundTrans", "Features")
+    g.SetFont("s10 Norm", "Segoe UI")
+    featuresLabel := g.Add("Text", "x+10 yp w620 c4B5563 BackgroundTrans", FormatFeatures(selectedFeatures))
+    cfgBtn := g.Add("Button", "xm y+6 w220", "⚙  Configure features…")
+
+    ; --- Model ---------------------------------------------------------------
+    g.SetFont("s10 Bold", "Segoe UI")
+    g.Add("Text", "xm y+14 Section c374151 BackgroundTrans", "Model")
+    g.SetFont("s10 Norm", "Segoe UI")
+    ddModel := g.Add("DropDownList", "x+10 yp-3 w360 Choose" chooseIdx, ModelCatalog)
+
+    ; --- Status --------------------------------------------------------------
+    statusText := g.Add("Text", "xm y+16 w820 c059669 BackgroundTrans", "● Ready")
+
+    ; --- Result --------------------------------------------------------------
+    g.SetFont("s10 Bold", "Segoe UI")
+    g.Add("Text", "xm y+8 c374151 BackgroundTrans", "Result")
+    g.SetFont("s9 Norm", "Segoe UI")
+    g.Add("Text", "x+10 yp+2 c9CA3AF BackgroundTrans", "· auto-copied to clipboard")
+    g.SetFont("s10 Norm", "Segoe UI")
     resultEdit := g.Add("Edit", "xm y+4 w820 h280 ReadOnly +Wrap")
 
-    copyBtn  := g.Add("Button", "xm y+10 w160", "Copy result")
-    rerunBtn := g.Add("Button", "x+10 w120",    "Re-translate")
-    closeBtn := g.Add("Button", "x+10 w120 Default", "Close")
+    ; --- Actions -------------------------------------------------------------
+    copyBtn  := g.Add("Button", "xm y+12 w170 Default", "📋  Copy result")
+    rerunBtn := g.Add("Button", "x+10 w150", "↻  Re-translate")
+    closeBtn := g.Add("Button", "x+10 w120", "Close")
 
     state := { running: false, restartRequested: false, seq: 0 }
 
     GetSelected() {
         return selectedFeatures
+    }
+
+    SetStatus(msg, color) {
+        statusText.SetFont("c" color)
+        statusText.Value := msg
+    }
+
+    UpdateCharCount(*) {
+        charCount.Value := StrLen(inputEdit.Value) " chars"
     }
 
     SetBusy(busy) {
@@ -288,7 +324,7 @@ ShowTranslatorWindow(sourceText, autoRun) {
 
         textToTranslate := Trim(inputEdit.Value)
         if (textToTranslate = "") {
-            statusText.Value := "Input is empty."
+            SetStatus("● Input is empty", "9CA3AF")
             resultEdit.Value := ""
             return
         }
@@ -303,7 +339,7 @@ ShowTranslatorWindow(sourceText, autoRun) {
         state.running := true
         state.restartRequested := false
         SetBusy(true)
-        statusText.Value := "Translating with " modl " (" (feat = "" ? "default" : feat) ")…"
+        SetStatus("◐ Translating with " modl " (" (feat = "" ? "default" : feat) ")…", "D97706")
         resultEdit.Value := ""
         SetTimer(() => RunOnce(textToTranslate, feat, modl, seq), -10)
     }
@@ -321,19 +357,19 @@ ShowTranslatorWindow(sourceText, autoRun) {
         }
 
         if (result.error != "") {
-            statusText.Value := "Error — see Open log file in tray."
+            SetStatus("✕ Error — see Open log file in tray", "DC2626")
             resultEdit.Value := result.error
             return
         }
         if (result.output = "") {
-            statusText.Value := "Empty response."
+            SetStatus("● Empty response", "9CA3AF")
             return
         }
         resultEdit.Value := result.output
         A_Clipboard := result.output
         try FileDelete LastResultPath
         FileAppend(result.output, LastResultPath, "UTF-8")
-        statusText.Value := "Done. Result copied to clipboard."
+        SetStatus("✓ Done — result copied to clipboard", "059669")
     }
 
     DebouncedTranslate(*) {
@@ -349,9 +385,15 @@ ShowTranslatorWindow(sourceText, autoRun) {
 
     OpenFeatureConfig(*) {
         cfg := Gui("+Owner" g.Hwnd " +ToolWindow", "Configure Features")
+        cfg.BackColor := "F4F5F7"
         cfg.SetFont("s10", "Segoe UI")
-        cfg.MarginX := 12, cfg.MarginY := 12
-        cfg.Add("Text", "xm", "Select features to apply (re-translates on save):")
+        cfg.MarginX := 16, cfg.MarginY := 14
+        cfg.SetFont("s12 Bold", "Segoe UI")
+        cfg.Add("Text", "xm c1F2937 BackgroundTrans", "Configure features")
+        cfg.SetFont("s9 Norm", "Segoe UI")
+        cfg.Add("Text", "xm y+2 c6B7280 BackgroundTrans", "Re-translates automatically when you save")
+        cfg.SetFont("s10 Norm", "Segoe UI")
+        cfg.Add("Text", "xm y+10 c374151 BackgroundTrans", "Select features to apply:")
 
         enabledNow := Map()
         for f in StrSplit(selectedFeatures, ",")
@@ -361,7 +403,7 @@ ShowTranslatorWindow(sourceText, autoRun) {
         cfgBoxes := Map()
         for i, item in FeatureCatalog {
             name := item[1], label := item[2]
-            opts := (Mod(i, 2) = 1) ? "xm y+8 w360 v" name : "x+12 yp w360 v" name
+            opts := (Mod(i, 2) = 1) ? "xm y+10 w360 v" name : "x+12 yp w360 v" name
             if (enabledNow.Has(name))
                 opts .= " Checked"
             cfgBoxes[name] := cfg.Add("CheckBox", opts, label)
@@ -396,18 +438,20 @@ ShowTranslatorWindow(sourceText, autoRun) {
     }
 
     inputEdit.OnEvent("Change", DebouncedTranslate)
+    inputEdit.OnEvent("Change", UpdateCharCount)
     cfgBtn.OnEvent("Click", OpenFeatureConfig)
     ddModel.OnEvent("Change", DebouncedTranslate)
 
     rerunBtn.OnEvent("Click", ForceTranslate)
     copyBtn.OnEvent("Click", (*) => (
         A_Clipboard := resultEdit.Value,
-        statusText.Value := "Result copied to clipboard ✓"
+        SetStatus("✓ Result copied to clipboard", "059669")
     ))
     UpdateWindow(newText, doAutoRun) {
         inputEdit.Value := newText
         snapshotEdit.Value := newText
-        statusText.Value := "Ready."
+        UpdateCharCount()
+        SetStatus("● Ready", "059669")
         resultEdit.Value := ""
         g.Show()
         WinActivate("ahk_id " g.Hwnd)
