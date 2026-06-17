@@ -97,3 +97,19 @@
 2026-06-17 13:26:02  Window translate  features=[POLISH,BILINGUAL_EN_ZHTW,SUMMARY]  model=openai/gpt-4o-mini  inputLen=1742
 2026-06-17 13:26:02  Running: cmd.exe /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\maxchien\repos\_project\LangHelper\langhelper.ps1" -Features "POLISH,BILINGUAL_EN_ZHTW,SUMMARY" -Model "openai/gpt-4o-mini" -InputFile "C:\Users\maxchien\AppData\Local\Temp\langhelper_in.txt" -OutputFile "C:\Users\maxchien\AppData\Local\Temp\langhelper_out.txt" 1>> "C:\Users\maxchien\AppData\Local\Temp\langhelper_err.txt" 2>&1
 2026-06-17 13:26:24  Window backend returned  exit=0  outLen=4840
+2026-06-17 13:54:16  Trigger fired (dryRun=0, clipboard length=16)
+2026-06-17 13:54:16  Window translate  features=[POLISH,BILINGUAL_EN_ZHTW,SUMMARY]  model=openai/gpt-4o-mini  inputLen=16
+2026-06-17 13:54:16  Running: cmd.exe /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\maxchien\repos\_project\LangHelper\langhelper.ps1" -Features "POLISH,BILINGUAL_EN_ZHTW,SUMMARY" -Model "openai/gpt-4o-mini" -InputFile "C:\Users\maxchien\AppData\Local\Temp\langhelper_in.txt" -OutputFile "C:\Users\maxchien\AppData\Local\Temp\langhelper_out.txt" 1>> "C:\Users\maxchien\AppData\Local\Temp\langhelper_err.txt" 2>&1
+2026-06-17 13:54:20  Window backend returned  exit=0  outLen=114
+2026-06-17 14:22:16  Trigger fired (dryRun=0, clipboard length=363)
+2026-06-17 14:22:16  Window translate  features=[POLISH,BILINGUAL_EN_ZHTW,SUMMARY]  model=openai/gpt-4o-mini  inputLen=358
+2026-06-17 14:22:16  Running: cmd.exe /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\maxchien\repos\_project\LangHelper\langhelper.ps1" -Features "POLISH,BILINGUAL_EN_ZHTW,SUMMARY" -Model "openai/gpt-4o-mini" -InputFile "C:\Users\maxchien\AppData\Local\Temp\langhelper_in.txt" -OutputFile "C:\Users\maxchien\AppData\Local\Temp\langhelper_out.txt" 1>> "C:\Users\maxchien\AppData\Local\Temp\langhelper_err.txt" 2>&1
+2026-06-17 14:22:24  Window backend returned  exit=0  outLen=993
+2026-06-17 14:23:02  Trigger fired (dryRun=0, clipboard length=167)
+2026-06-17 14:23:03  Window translate  features=[POLISH,BILINGUAL_EN_ZHTW,SUMMARY]  model=openai/gpt-4o-mini  inputLen=167
+2026-06-17 14:23:03  Running: cmd.exe /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\maxchien\repos\_project\LangHelper\langhelper.ps1" -Features "POLISH,BILINGUAL_EN_ZHTW,SUMMARY" -Model "openai/gpt-4o-mini" -InputFile "C:\Users\maxchien\AppData\Local\Temp\langhelper_in.txt" -OutputFile "C:\Users\maxchien\AppData\Local\Temp\langhelper_out.txt" 1>> "C:\Users\maxchien\AppData\Local\Temp\langhelper_err.txt" 2>&1
+2026-06-17 14:23:08  Window backend returned  exit=0  outLen=495
+2026-06-17 14:23:40  Trigger fired (dryRun=0, clipboard length=495)
+2026-06-17 14:23:41  Window translate  features=[POLISH,BILINGUAL_EN_ZHTW,SUMMARY]  model=openai/gpt-4o-mini  inputLen=495
+2026-06-17 14:23:41  Running: cmd.exe /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\maxchien\repos\_project\LangHelper\langhelper.ps1" -Features "POLISH,BILINGUAL_EN_ZHTW,SUMMARY" -Model "openai/gpt-4o-mini" -InputFile "C:\Users\maxchien\AppData\Local\Temp\langhelper_in.txt" -OutputFile "C:\Users\maxchien\AppData\Local\Temp\langhelper_out.txt" 1>> "C:\Users\maxchien\AppData\Local\Temp\langhelper_err.txt" 2>&1
+2026-06-17 14:23:46  Window backend returned  exit=0  outLen=495
