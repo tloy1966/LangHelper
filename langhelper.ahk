@@ -111,6 +111,9 @@ OpenSettings() {
     ShowTranslatorWindow(text, false)
 }
 
+; --- Single active translator window -----------------------------------------
+ActiveTranslator := ""
+
 ; --- Double-Ctrl+C trigger ---------------------------------------------------
 LastCopyTick := 0
 
@@ -215,7 +218,17 @@ FormatFeatures(featStr) {
 }
 
 ShowTranslatorWindow(sourceText, autoRun) {
-    global FeatureCatalog, ModelCatalog, Settings, LastResultPath
+    global FeatureCatalog, ModelCatalog, Settings, LastResultPath, ActiveTranslator
+
+    ; Reuse the existing window if one is already open.
+    if (IsObject(ActiveTranslator)) {
+        try {
+            ActiveTranslator.update.Call(sourceText, autoRun)
+            return
+        } catch {
+            ActiveTranslator := ""
+        }
+    }
 
     g := Gui("+Resize", "LangHelper")
     g.SetFont("s10", "Segoe UI")
@@ -225,7 +238,7 @@ ShowTranslatorWindow(sourceText, autoRun) {
     inputEdit := g.Add("Edit", "xm y+4 w820 h100 +Wrap", sourceText)
 
     g.Add("Text", "xm y+10", "Clipboard snapshot:")
-    g.Add("Edit", "xm y+4 w820 h70 ReadOnly +Wrap", sourceText)
+    snapshotEdit := g.Add("Edit", "xm y+4 w820 h70 ReadOnly +Wrap", sourceText)
 
     ; --- Feature configuration (opens separate window) -----------------------
     selectedFeatures := Settings["Features"]
@@ -391,9 +404,30 @@ ShowTranslatorWindow(sourceText, autoRun) {
         A_Clipboard := resultEdit.Value,
         statusText.Value := "Result copied to clipboard ✓"
     ))
-    closeBtn.OnEvent("Click", (*) => g.Destroy())
-    g.OnEvent("Escape", (*) => g.Destroy())
-    g.OnEvent("Close",  (*) => g.Destroy())
+    UpdateWindow(newText, doAutoRun) {
+        inputEdit.Value := newText
+        snapshotEdit.Value := newText
+        statusText.Value := "Ready."
+        resultEdit.Value := ""
+        g.Show()
+        WinActivate("ahk_id " g.Hwnd)
+        if (doAutoRun && Trim(newText) != "") {
+            state.seq += 1
+            DoTranslate(state.seq)
+        }
+    }
+
+    DestroyWindow(*) {
+        global ActiveTranslator
+        ActiveTranslator := ""
+        g.Destroy()
+    }
+
+    closeBtn.OnEvent("Click", DestroyWindow)
+    g.OnEvent("Escape", DestroyWindow)
+    g.OnEvent("Close",  DestroyWindow)
+
+    ActiveTranslator := { gui: g, update: UpdateWindow }
 
     g.Show("AutoSize Center")
 
