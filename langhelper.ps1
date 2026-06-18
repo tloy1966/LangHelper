@@ -110,6 +110,38 @@ if (-not (Get-Command 'gh' -ErrorAction SilentlyContinue)) {
     throw "'gh' CLI not found. Install GitHub CLI and run: gh extension install github/gh-models"
 }
 
+# Preflight so new machines fail with an actionable message instead of a native
+# pipeline error when the gh-models extension is missing.
+$tmpHelpErr = [System.IO.Path]::GetTempFileName()
+try {
+    & gh help models *> $null 2> $tmpHelpErr
+    $helpExit = $LASTEXITCODE
+    if ($helpExit -ne 0) {
+        $helpErrText = ''
+        if (Test-Path -LiteralPath $tmpHelpErr) {
+            $helpErrText = [System.IO.File]::ReadAllText($tmpHelpErr, $utf8NoBom)
+        }
+        if ($helpErrText -match 'unknown command\s+"models"') {
+            throw @"
+'gh models' is not available in your current gh installation.
+
+Fix:
+1) gh auth login
+2) gh extension install github/gh-models
+3) (if already installed) gh extension upgrade github/gh-models
+4) Retry LangHelper.
+"@
+        }
+
+        throw "Unable to run 'gh help models' (exit $helpExit): $helpErrText"
+    }
+}
+finally {
+    if (Test-Path -LiteralPath $tmpHelpErr) {
+        Remove-Item -LiteralPath $tmpHelpErr -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # Force UTF-8 on the PowerShell pipeline so CJK survives the trip to gh.
 $prevInEnc  = [Console]::InputEncoding
 $prevOutEnc = [Console]::OutputEncoding
