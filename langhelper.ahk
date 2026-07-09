@@ -10,6 +10,8 @@ ScriptDir  := A_ScriptDir
 IniPath    := ScriptDir "\langhelper.ini"
 PromptPath := ScriptDir "\prompt.md"
 PsPath     := ScriptDir "\langhelper.ps1"
+HistoryPsPath := ScriptDir "\langhelper-history.ps1"
+HistoryDbPath := ScriptDir "\langhelper_history.sqlite"
 LogPath    := ScriptDir "\langhelper.log"
 LastResultPath := A_Temp "\langhelper_last_result.txt"
 
@@ -78,6 +80,7 @@ BuildTrayMenu() {
     tray.Add()
     tray.Add("Open prompt.md",   (*) => Run('"' PromptPath '"'))
     tray.Add("Show last result", (*) => ShowLastResult())
+    tray.Add("Search history...", (*) => ShowHistoryWindow())
     tray.Add("Open log file",    (*) => Run('"' LogPath '"'))
     tray.Add("Dry-run on clipboard (preview prompt)", (*) => DryRunOnClipboard())
     tray.Add()
@@ -85,6 +88,324 @@ BuildTrayMenu() {
     tray.Add("Exit",          (*) => ExitApp())
 
     A_IconTip := "LangHelper — Ctrl+C, Ctrl+C to translate`nFeatures: " Settings["Features"] "`nModel: " Settings["Model"]
+}
+
+PsArg(value) {
+    return '"' StrReplace(value, '"', '`"') '"'
+}
+
+RunHistoryCommand(args, outPath := "") {
+    global HistoryPsPath
+    tmpErr := A_Temp "\langhelper_history_err.txt"
+    try FileDelete tmpErr
+    cmdLine := 'cmd.exe /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File ' PsArg(HistoryPsPath) ' ' args ' 1>nul 2> "' tmpErr '"'
+    Log("History command: " cmdLine)
+    exitCode := RunWait(cmdLine, , "Hide")
+    err := FileExist(tmpErr) ? Trim(FileRead(tmpErr, "UTF-8"), " `t`r`n") : ""
+    if (exitCode != 0)
+        return { error: (err != "" ? err : "History command exited with code " exitCode), output: "", exit: exitCode }
+    output := (outPath != "" && FileExist(outPath)) ? FileRead(outPath, "UTF-8") : ""
+    return { error: "", output: output, exit: exitCode }
+}
+
+RecordHistory(sourceText, resultText, features, model) {
+    global HistoryDbPath
+    tmpBase := A_Temp "\langhelper_history_" A_TickCount
+    srcPath := tmpBase "_source.txt"
+    resPath := tmpBase "_result.txt"
+    try {
+        FileAppend(sourceText, srcPath, "UTF-8")
+        FileAppend(resultText, resPath, "UTF-8")
+        args := '-Action Insert -DbPath ' PsArg(HistoryDbPath)
+            . ' -SourceFile ' PsArg(srcPath)
+            . ' -ResultFile ' PsArg(resPath)
+            . ' -Features ' PsArg(features)
+            . ' -Model ' PsArg(model)
+        result := RunHistoryCommand(args)
+        if (result.error != "")
+            Log("History insert failed: " result.error)
+    } finally {
+        try FileDelete srcPath
+        try FileDelete resPath
+    }
+}
+
+SearchHistory(query, limit := 80) {
+    global HistoryDbPath
+    outPath := A_Temp "\langhelper_history_search.txt"
+    try FileDelete outPath
+    args := '-Action Search -DbPath ' PsArg(HistoryDbPath)
+        . ' -Query ' PsArg(query)
+        . ' -Limit ' limit
+        . ' -OutputFile ' PsArg(outPath)
+    return RunHistoryCommand(args, outPath)
+}
+
+GetHistoryItem(id) {
+    global HistoryDbPath
+    srcPath := A_Temp "\langhelper_history_detail_source.txt"
+    resPath := A_Temp "\langhelper_history_detail_result.txt"
+    try FileDelete srcPath
+    try FileDelete resPath
+    args := '-Action Get -DbPath ' PsArg(HistoryDbPath)
+        . ' -Id ' id
+        . ' -SourceOut ' PsArg(srcPath)
+        . ' -ResultOut ' PsArg(resPath)
+    result := RunHistoryCommand(args)
+    if (result.error != "")
+        return { error: result.error, source: "", result: "" }
+    sourceText := FileExist(srcPath) ? FileRead(srcPath, "UTF-8") : ""
+    resultText := FileExist(resPath) ? FileRead(resPath, "UTF-8") : ""
+    return { error: "", source: sourceText, result: resultText }
+}
+
+HexToText(hex) {
+    hex := Trim(hex)
+    if (hex = "")
+        return ""
+    byteCount := Floor(StrLen(hex) / 2)
+    buf := Buffer(byteCount)
+    Loop byteCount {
+        byteValue := Integer("0x" SubStr(hex, (A_Index - 1) * 2 + 1, 2))
+        NumPut("UChar", byteValue, buf, A_Index - 1)
+    }
+    return StrGet(buf, byteCount, "UTF-8")
+}
+
+PreviewText(text, maxLen := 140) {
+    preview := Trim(StrReplace(StrReplace(text, "`r", " "), "`n", " "))
+    while InStr(preview, "  ")
+        preview := StrReplace(preview, "  ", " ")
+    if (StrLen(preview) > maxLen)
+        return SubStr(preview, 1, maxLen - 3) "..."
+    return preview
+}
+
+ResultColumnForHeading(heading) {
+    lower := StrLower(heading)
+    if (InStr(heading, "繁體中文") || InStr(heading, "中文") || InStr(lower, "zh-tw"))
+        return "Chinese"
+    if (InStr(lower, "polished") || InStr(heading, "潤飾"))
+        return "Polished"
+    if (InStr(lower, "english"))
+        return "English"
+    return "Other"
+}
+
+SplitResultColumns(resultText) {
+    columns := Map("English", "", "Chinese", "", "Polished", "", "Other", "")
+    current := "Other"
+    foundHeading := false
+    Loop Parse resultText, "`n", "`r" {
+        line := A_LoopField
+        if (RegExMatch(line, "^\s*##\s+(.+?)\s*$", &match)) {
+            current := ResultColumnForHeading(match[1])
+            foundHeading := true
+            continue
+        }
+        if (Trim(line) = "")
+            continue
+        columns[current] .= (columns[current] = "" ? "" : "`n") line
+    }
+    if (!foundHeading && columns["Other"] = "")
+        columns["Other"] := resultText
+    return columns
+}
+
+ShowHistoryWindow() {
+    g := Gui("+Resize +MinSize860x520", "LangHelper History")
+    g.BackColor := "F4F5F7"
+    g.SetFont("s10", "Segoe UI")
+    g.MarginX := 16, g.MarginY := 14
+
+    g.SetFont("s14 Bold", "Segoe UI")
+    titleText := g.Add("Text", "xm ym c111827 BackgroundTrans", "History")
+    g.SetFont("s9 Norm", "Segoe UI")
+    statusText := g.Add("Text", "xm y+4 w820 c6B7280 BackgroundTrans", "Search source or result text")
+    searchEdit := g.Add("Edit", "xm y+12 w640 h26")
+    searchBtn := g.Add("Button", "x+8 yp w90 h26 Default", "Search")
+    openBtn := g.Add("Button", "x+8 yp w110 h26", "Open")
+    lv := g.Add("ListView", "xm y+12 w840 h380 Grid", ["Time", "Source", "English", "Chinese", "Polished", "Other"])
+    copyBtn := g.Add("Button", "xm y+10 w140", "Copy result")
+    rerunBtn := g.Add("Button", "x+8 yp w150", "Re-run source")
+    closeBtn := g.Add("Button", "x+408 yp w120", "Close")
+
+    rowIds := []
+
+    SetStatus(msg, color := "6B7280") {
+        statusText.SetFont("c" color)
+        statusText.Value := msg
+    }
+
+    LoadRows(*) {
+        rowIds := []
+        lv.Delete()
+        result := SearchHistory(searchEdit.Value, 100)
+        if (result.error != "") {
+            SetStatus(result.error, "DC2626")
+            return
+        }
+        rows := StrSplit(Trim(result.output, "`r`n"), "`n", "`r")
+        sep := Chr(31)
+        count := 0
+        for row in rows {
+            if (Trim(row) = "")
+                continue
+            fields := StrSplit(row, sep)
+            if (fields.Length < 4)
+                continue
+            rowIds.Push(fields[1])
+            sourceText := HexToText(fields[3])
+            resultText := HexToText(fields[4])
+            split := SplitResultColumns(resultText)
+            lv.Add(""
+                , fields[2]
+                , PreviewText(sourceText, 120)
+                , PreviewText(split["English"], 120)
+                , PreviewText(split["Chinese"], 120)
+                , PreviewText(split["Polished"], 120)
+                , PreviewText(split["Other"], 120))
+            count += 1
+        }
+        lv.ModifyCol(1, 135)
+        lv.ModifyCol(2, 210)
+        lv.ModifyCol(3, 180)
+        lv.ModifyCol(4, 180)
+        lv.ModifyCol(5, 180)
+        lv.ModifyCol(6, 220)
+        SetStatus(count " item(s)", "059669")
+    }
+
+    GetSelectedId() {
+        row := lv.GetNext()
+        if (!row || row > rowIds.Length)
+            return 0
+        return rowIds[row]
+    }
+
+    OpenSelected(*) {
+        id := GetSelectedId()
+        if (!id) {
+            SetStatus("Select a history item first.", "D97706")
+            return
+        }
+        item := GetHistoryItem(id)
+        if (item.error != "") {
+            SetStatus(item.error, "DC2626")
+            return
+        }
+        ShowHistoryDetail(item.source, item.result)
+    }
+
+    CopySelectedResult(*) {
+        id := GetSelectedId()
+        if (!id) {
+            SetStatus("Select a history item first.", "D97706")
+            return
+        }
+        item := GetHistoryItem(id)
+        if (item.error != "") {
+            SetStatus(item.error, "DC2626")
+            return
+        }
+        A_Clipboard := item.result
+        SetStatus("Result copied to clipboard.", "2563EB")
+    }
+
+    RerunSelected(*) {
+        id := GetSelectedId()
+        if (!id) {
+            SetStatus("Select a history item first.", "D97706")
+            return
+        }
+        item := GetHistoryItem(id)
+        if (item.error != "") {
+            SetStatus(item.error, "DC2626")
+            return
+        }
+        ShowTranslatorWindow(item.source, true)
+    }
+
+    Layout(clientW := 0, clientH := 0) {
+        if (clientW <= 0 || clientH <= 0)
+            g.GetClientPos(, , &clientW, &clientH)
+        margin := 16
+        width := Max(760, clientW - margin * 2)
+        titleText.Move(margin, 14, width)
+        statusText.Move(margin, 44, width)
+        searchW := Max(360, width - 230)
+        searchEdit.Move(margin, 76, searchW, 26)
+        searchBtn.Move(margin + searchW + 8, 76, 90, 26)
+        openBtn.Move(margin + searchW + 106, 76, 110, 26)
+        actionY := clientH - margin - 30
+        lv.Move(margin, 114, width, Max(200, actionY - 124))
+        copyBtn.Move(margin, actionY, 140, 30)
+        rerunBtn.Move(margin + 150, actionY, 150, 30)
+        closeBtn.Move(margin + width - 120, actionY, 120, 30)
+    }
+
+    searchBtn.OnEvent("Click", LoadRows)
+    searchEdit.OnEvent("Change", (*) => SetTimer(LoadRows, -350))
+    lv.OnEvent("DoubleClick", OpenSelected)
+    openBtn.OnEvent("Click", OpenSelected)
+    copyBtn.OnEvent("Click", CopySelectedResult)
+    rerunBtn.OnEvent("Click", RerunSelected)
+    closeBtn.OnEvent("Click", (*) => g.Destroy())
+    g.OnEvent("Escape", (*) => g.Destroy())
+    g.OnEvent("Close", (*) => g.Destroy())
+    g.OnEvent("Size", (guiObj, minMax, width, height) => (minMax = -1 ? 0 : Layout(width, height)))
+
+    g.Show("w940 h560 Center")
+    Layout()
+    LoadRows()
+}
+
+ShowHistoryDetail(sourceText, resultText) {
+    g := Gui("+Resize +MinSize760x520", "LangHelper History Item")
+    g.BackColor := "F4F5F7"
+    g.SetFont("s10", "Segoe UI")
+    g.MarginX := 16, g.MarginY := 14
+    g.SetFont("s10 Bold", "Segoe UI")
+    sourceHdr := g.Add("Text", "xm ym c374151 BackgroundTrans", "Source")
+    g.SetFont("s10 Norm", "Segoe UI")
+    sourceEdit := g.Add("Edit", "xm y+6 w780 h160 ReadOnly +Wrap", sourceText)
+    g.SetFont("s10 Bold", "Segoe UI")
+    resultHdr := g.Add("Text", "xm y+12 c374151 BackgroundTrans", "Result")
+    g.SetFont("s10 Norm", "Segoe UI")
+    resultEdit := g.Add("Edit", "xm y+6 w780 h220 ReadOnly +Wrap", resultText)
+    copySourceBtn := g.Add("Button", "xm y+10 w130", "Copy source")
+    copyResultBtn := g.Add("Button", "x+8 yp w130", "Copy result")
+    rerunBtn := g.Add("Button", "x+8 yp w130", "Re-run")
+    closeBtn := g.Add("Button", "x+252 yp w120 Default", "Close")
+
+    Layout(clientW := 0, clientH := 0) {
+        if (clientW <= 0 || clientH <= 0)
+            g.GetClientPos(, , &clientW, &clientH)
+        margin := 16
+        width := Max(620, clientW - margin * 2)
+        sourceHdr.Move(margin, 14, width)
+        sourceH := Max(120, Round(clientH * 0.28))
+        sourceEdit.Move(margin, 40, width, sourceH)
+        resultY := 40 + sourceH + 16
+        resultHdr.Move(margin, resultY, width)
+        resultY += 26
+        actionY := clientH - margin - 30
+        resultEdit.Move(margin, resultY, width, Max(140, actionY - resultY - 10))
+        copySourceBtn.Move(margin, actionY, 130, 30)
+        copyResultBtn.Move(margin + 138, actionY, 130, 30)
+        rerunBtn.Move(margin + 276, actionY, 130, 30)
+        closeBtn.Move(margin + width - 120, actionY, 120, 30)
+    }
+
+    copySourceBtn.OnEvent("Click", (*) => A_Clipboard := sourceText)
+    copyResultBtn.OnEvent("Click", (*) => A_Clipboard := resultText)
+    rerunBtn.OnEvent("Click", (*) => ShowTranslatorWindow(sourceText, true))
+    closeBtn.OnEvent("Click", (*) => g.Destroy())
+    g.OnEvent("Escape", (*) => g.Destroy())
+    g.OnEvent("Close", (*) => g.Destroy())
+    g.OnEvent("Size", (guiObj, minMax, width, height) => (minMax = -1 ? 0 : Layout(width, height)))
+    g.Show("w860 h620 Center")
+    Layout()
 }
 
 ShowLastResult() {
@@ -289,6 +610,7 @@ ShowTranslatorWindow(sourceText, autoRun) {
     ; --- Actions -------------------------------------------------------------
     rerunBtn := g.Add("Button", "x16 y636 w150 h30 Default", "&Re-translate")
     copyBtn  := g.Add("Button", "x176 y636 w140 h30", "&Copy result")
+    historyBtn := g.Add("Button", "x326 y636 w110 h30", "&History")
     closeBtn := g.Add("Button", "x716 y636 w120 h30", "&Close")
 
     state := { running: false, restartRequested: false, seq: 0 }
@@ -380,6 +702,7 @@ ShowTranslatorWindow(sourceText, autoRun) {
 
         rerunBtn.Move(margin, actionY, 150, btnH)
         copyBtn.Move(margin + 160, actionY, 140, btnH)
+        historyBtn.Move(margin + 310, actionY, 110, btnH)
         closeBtn.Move(margin + width - 120, actionY, 120, btnH)
     }
 
@@ -439,6 +762,7 @@ ShowTranslatorWindow(sourceText, autoRun) {
         A_Clipboard := result.output
         try FileDelete LastResultPath
         FileAppend(result.output, LastResultPath, "UTF-8")
+        SetTimer(() => RecordHistory(textToTranslate, result.output, feat, modl), -10)
         SetStatus("Done. Result copied to clipboard.", "059669")
     }
 
@@ -564,6 +888,7 @@ ShowTranslatorWindow(sourceText, autoRun) {
         A_Clipboard := resultEdit.Value,
         SetStatus("Result copied to clipboard.", "2563EB")
     ))
+    historyBtn.OnEvent("Click", (*) => ShowHistoryWindow())
 
     g.OnEvent("Size", (guiObj, minMax, width, height) => (
         minMax = -1 ? 0 : Layout(width, height)

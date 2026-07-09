@@ -28,8 +28,10 @@ langhelper.ahk  ──reads clipboard──►  opens translator window
 |---|---|
 | [prompt.md](prompt.md) | LLM prompt spec — Core block + every `[FEATURE: NAME]` block. Edit freely; the PS script re-reads it on every call. |
 | [langhelper.ps1](langhelper.ps1) | Assembles the prompt and calls `gh models run` via a native PowerShell pipe (UTF-8 in/out, stderr captured). |
+| [langhelper-history.ps1](langhelper-history.ps1) | Stores and searches completed translations in a local SQLite database. |
 | [langhelper.ahk](langhelper.ahk) | AutoHotkey v2: double-Ctrl+C detector, tray menu, combined translator window with a separate Configure-features window and live re-translate on feature/model change. |
 | `langhelper.ini` | Auto-created. Persists last-used features + model. |
+| `langhelper_history.sqlite` | Auto-created. Local searchable history database. |
 | `langhelper.log` | Auto-created. Timestamped log of every trigger and backend call. |
 
 ## AutoHotkey 介紹
@@ -67,6 +69,7 @@ winget install AutoHotkey.AutoHotkey        # v2.x
 ```powershell
 winget install AutoHotkey.AutoHotkey        # v2.x
 winget install GitHub.cli
+winget install SQLite.SQLite               # enables local searchable history
 gh auth login
 gh extension install github/gh-models
 ```
@@ -110,7 +113,10 @@ To inspect / remove later: `explorer.exe shell:startup` and delete
    - **Model** dropdown — switch models on the fly.
    - **Result** panel updates live (~700 ms debounce after any change)
      and the result is auto-copied to the clipboard.
+   - Every successful result is recorded in `langhelper_history.sqlite`.
 4. Paste with **Ctrl+V**. Or click **Copy result** to recopy.
+5. Tray → **Search history...** to find previous source/result text, copy a
+   result, inspect the full item, or re-run the original source text.
 
 ## Features (defined in [prompt.md](prompt.md))
 
@@ -147,6 +153,9 @@ Change anytime via tray → **Model ▸** or the dropdown in the translator wind
 - **Model ▸** — quick model switcher (checked = current).
 - **Open prompt.md** — opens the prompt in your default editor.
 - **Show last result** — re-opens the previous translation in a viewer window.
+- **Search history...** — opens a SQLite-backed searchable history of completed
+   translations. Double-click a row to inspect it, copy the result, or re-run the
+   original source text.
 - **Open log file** — opens `langhelper.log`.
 - **Dry-run on clipboard (preview prompt)** — assembles the full prompt and
   shows it in a window *without* calling the model. Great when iterating on
