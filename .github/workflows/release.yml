@@ -1,0 +1,180 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AUTOHOTKEY_VERSION: '2.0.26'
+  AUTOHOTKEY_SHA256: '43522AA3122A57784AC5DB30ABF85C2244475C36ACD7796E2C993355F9E926AE'
+  AHK2EXE_VERSION: '1.1.37.02a2'
+  AHK2EXE_SHA256: 'C29B8C3A5124850D79FC9E66E2CA79677C377D7F31631AD3022BA159C5D9E3BE'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Validate semantic version tag
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $semver = '^v\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if ($tag -notmatch $semver) {
+            throw "Release tag '$tag' must look like v1.2.3 or v1.2.3-beta.1."
+          }
+
+      - name: Validate PowerShell and prompt assembly
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path . -Filter '*.ps1' | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            )
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error $_.Message }
+              throw "PowerShell syntax validation failed for $($_.Name)."
+            }
+          }
+
+          $inputPath = Join-Path $env:RUNNER_TEMP 'input.txt'
+          $outputPath = Join-Path $env:RUNNER_TEMP 'output.txt'
+          [IO.File]::WriteAllText($inputPath, 'Release smoke test', [Text.UTF8Encoding]::new($false))
+          ./langhelper.ps1 -Features 'POLISH,BILINGUAL_EN_ZHTW' -InputFile $inputPath -OutputFile $outputPath -DryRun
+          $assembled = [IO.File]::ReadAllText($outputPath)
+          if ($assembled.Contains('{{PASTE_CLIPBOARD_HERE}}') -or
+              -not $assembled.Contains('[FEATURE: POLISH]') -or
+              -not $assembled.Contains('Release smoke test')) {
+            throw 'Prompt assembly smoke test failed.'
+          }
+
+      - name: Download pinned AutoHotkey build tools
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tools = Join-Path $env:RUNNER_TEMP 'langhelper-tools'
+          New-Item -ItemType Directory -Path $tools -Force | Out-Null
+
+          gh release download "v$env:AUTOHOTKEY_VERSION" `
+            --repo AutoHotkey/AutoHotkey `
+            --pattern "AutoHotkey_$env:AUTOHOTKEY_VERSION.zip" `
+            --dir $tools
+          gh release download "Ahk2Exe$env:AHK2EXE_VERSION" `
+            --repo AutoHotkey/Ahk2Exe `
+            --pattern "Ahk2Exe$env:AHK2EXE_VERSION.zip" `
+            --dir $tools
+
+          $ahkArchive = Join-Path $tools "AutoHotkey_$env:AUTOHOTKEY_VERSION.zip"
+          $compilerArchive = Join-Path $tools "Ahk2Exe$env:AHK2EXE_VERSION.zip"
+          if ((Get-FileHash $ahkArchive -Algorithm SHA256).Hash -ne $env:AUTOHOTKEY_SHA256) {
+            throw 'AutoHotkey archive checksum mismatch.'
+          }
+          if ((Get-FileHash $compilerArchive -Algorithm SHA256).Hash -ne $env:AHK2EXE_SHA256) {
+            throw 'Ahk2Exe archive checksum mismatch.'
+          }
+
+          Expand-Archive $ahkArchive (Join-Path $tools 'autohotkey') -Force
+          Expand-Archive $compilerArchive (Join-Path $tools 'compiler') -Force
+          "LANGHELPER_TOOLS=$tools" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Compile application
+        shell: pwsh
+        run: |
+          $base = Get-ChildItem (Join-Path $env:LANGHELPER_TOOLS 'autohotkey') `
+            -Filter 'AutoHotkey64.exe' -Recurse | Select-Object -First 1
+          $compiler = Get-ChildItem (Join-Path $env:LANGHELPER_TOOLS 'compiler') `
+            -Filter 'Ahk2Exe.exe' -Recurse | Select-Object -First 1
+          if (-not $base -or -not $compiler) { throw 'AutoHotkey build tools were not found.' }
+
+          $outDir = Join-Path $env:RUNNER_TEMP 'compiled'
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          $process = Start-Process -FilePath $compiler.FullName -ArgumentList @(
+            '/in', (Resolve-Path ./langhelper.ahk).Path,
+            '/out', "$outDir/LangHelper.exe",
+            '/base', $base.FullName
+          ) -Wait -PassThru
+          if ($process.ExitCode -ne 0 -or -not (Test-Path "$outDir/LangHelper.exe")) {
+            throw "Ahk2Exe compilation failed with exit code $($process.ExitCode)."
+          }
+          "LANGHELPER_EXE=$outDir/LangHelper.exe" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Package release
+        id: package
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $packageName = "LangHelper-$tag-windows-x64"
+          $staging = Join-Path $env:RUNNER_TEMP $packageName
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+
+          Copy-Item $env:LANGHELPER_EXE (Join-Path $staging 'LangHelper.exe')
+          @(
+            'langhelper.ahk',
+            'langhelper.ps1',
+            'langhelper-history.ps1',
+            'prompt.md',
+            'README.md'
+          ) | ForEach-Object { Copy-Item $_ $staging }
+          [IO.File]::WriteAllText(
+            (Join-Path $staging 'VERSION.txt'),
+            "$tag`n${{ github.sha }}`n",
+            [Text.UTF8Encoding]::new($false)
+          )
+
+          $zip = Join-Path $PWD "$packageName.zip"
+          Compress-Archive -Path $staging -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $checksum = "$hash  $packageName.zip`n"
+          $checksumPath = "$zip.sha256"
+          [IO.File]::WriteAllText($checksumPath, $checksum, [Text.UTF8Encoding]::new($false))
+
+          "zip=$zip" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "checksum=$checksumPath" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "name=$packageName" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.checksum }}
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ZIP_PATH: ${{ steps.package.outputs.zip }}
+          CHECKSUM_PATH: ${{ steps.package.outputs.checksum }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $env:ZIP_PATH $env:CHECKSUM_PATH --clobber
+          } else {
+            $releaseType = @()
+            if ($tag.Contains('-')) { $releaseType = @('--prerelease') }
+            gh release create $tag $env:ZIP_PATH $env:CHECKSUM_PATH `
+              --verify-tag `
+              --generate-notes `
+              --title "LangHelper $tag" `
+              @releaseType
+          }

@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate PowerShell syntax
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem -Path . -Filter '*.ps1' | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            )
+            if ($errors.Count -gt 0) {
+              $failed = $true
+              $errors | ForEach-Object {
+                Write-Error "$($_.Extent.File):$($_.Extent.StartLineNumber): $($_.Message)"
+              }
+            }
+          }
+          if ($failed) { throw 'PowerShell syntax validation failed.' }
+
+      - name: Test prompt assembly
+        shell: pwsh
+        run: |
+          $inputPath = Join-Path $env:RUNNER_TEMP 'langhelper-input.txt'
+          $outputPath = Join-Path $env:RUNNER_TEMP 'langhelper-output.txt'
+          [IO.File]::WriteAllText($inputPath, '這是一個測試。', [Text.UTF8Encoding]::new($false))
+
+          ./langhelper.ps1 `
+            -Features 'POLISH,BILINGUAL_EN_ZHTW' `
+            -InputFile $inputPath `
+            -OutputFile $outputPath `
+            -DryRun
+
+          $assembled = [IO.File]::ReadAllText($outputPath)
+          @(
+            '[FEATURE: POLISH]',
+            '[FEATURE: BILINGUAL_EN_ZHTW]',
+            '<clipboard>',
+            '這是一個測試。',
+            '</clipboard>'
+          ) | ForEach-Object {
+            if (-not $assembled.Contains($_)) {
+              throw "Assembled prompt is missing: $_"
+            }
+          }
+          if ($assembled.Contains('{{PASTE_CLIPBOARD_HERE}}')) {
+            throw 'Clipboard placeholder was not replaced.'
+          }
+
+      - name: Verify feature catalog matches prompt
+        shell: pwsh
+        run: |
+          $prompt = Get-Content ./prompt.md -Raw
+          $ahk = Get-Content ./langhelper.ahk -Raw
+          $promptFeatures = [regex]::Matches($prompt, '\[FEATURE:\s*([A-Z0-9_]+)\]') |
+            ForEach-Object { $_.Groups[1].Value } |
+            Sort-Object -Unique
+          $ahkFeatures = [regex]::Matches($ahk, '^\s*\["([A-Z0-9_]+)",', 'Multiline') |
+            ForEach-Object { $_.Groups[1].Value } |
+            Sort-Object -Unique
+
+          $difference = Compare-Object $promptFeatures $ahkFeatures
+          if ($difference) {
+            $difference | Format-Table | Out-String | Write-Host
+            throw 'FeatureCatalog and prompt.md feature blocks do not match.'
+          }

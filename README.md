@@ -5,6 +5,26 @@ modular [prompt.md](prompt.md) and GitHub's `gh models` CLI. One window lets you
 configure features (Polish, Bilingual EN/zh-TW, Glossary, etc.) in a dedicated
 Configure window and watch the translation update live as you change settings.
 
+## Install a release
+
+1. Download `LangHelper-vX.Y.Z-windows-x64.zip` from the GitHub **Releases** page.
+2. Optionally verify it against the accompanying `.zip.sha256` file.
+3. Extract the entire archive to a writable folder. Keep `LangHelper.exe`, the
+   PowerShell scripts, and [prompt.md](prompt.md) together.
+4. Install GitHub CLI and SQLite, then authenticate and add GitHub Models:
+
+   ```powershell
+   winget install GitHub.cli SQLite.SQLite
+   gh auth login
+   gh extension install github/gh-models
+   ```
+
+5. Run `LangHelper.exe`. The compiled release does not require a separate
+   AutoHotkey installation.
+
+Windows may show a SmartScreen warning because releases are not code-signed.
+Verify the SHA-256 checksum before choosing **Run anyway**.
+
 ```
 Ctrl+C, Ctrl+C
    │
@@ -310,3 +330,23 @@ blocks by scanning the markdown.
     shows a read-only features summary plus a **⚙ Configure features…**
     button that opens a dedicated checkbox window; **Save** applies the
     selection, persists it, and re-translates.
+
+## Publishing a release (maintainers)
+
+Pull requests and pushes to `main` run the CI workflow, which validates
+PowerShell syntax, prompt assembly, and synchronization between prompt feature
+blocks and the AutoHotkey feature catalog.
+
+To publish, create and push a semantic-version tag from a tested `main` commit:
+
+```powershell
+git switch main
+git pull --ff-only
+git tag -a v1.0.0 -m "LangHelper v1.0.0"
+git push origin v1.0.0
+```
+
+The release workflow validates the tag, compiles the AutoHotkey v2 application,
+packages the executable with its required companion files, generates a SHA-256
+checksum, and creates GitHub release notes. Pre-release tags such as
+`v1.1.0-beta.1` are automatically marked as GitHub pre-releases.
