@@ -50,7 +50,7 @@ langhelper.ahk  ──reads clipboard──►  opens translator window
 | [langhelper.ps1](langhelper.ps1) | Assembles the prompt and calls `gh models run` via a native PowerShell pipe (UTF-8 in/out, stderr captured). |
 | [langhelper-history.ps1](langhelper-history.ps1) | Stores and searches completed translations in a local SQLite database. |
 | [langhelper.ahk](langhelper.ahk) | AutoHotkey v2: double-Ctrl+C detector, tray menu, combined translator window with a separate Configure-features window and live re-translate on feature/model change. |
-| `langhelper.ini` | Auto-created. Persists last-used features + model. |
+| `langhelper.ini` | Auto-created. Persists settings (features, model, and the options in [Settings](#settings-langhelperini)). |
 | `langhelper_history.sqlite` | Auto-created. Local searchable history database. |
 | `langhelper.log` | Auto-created. Timestamped log of every trigger and backend call. |
 
@@ -209,7 +209,30 @@ To inspect / remove later: `explorer.exe shell:startup` and delete
 | `BACK_TRANSLATE` | Back-translation sanity check + drift notes. |
 | `ROMANIZE` | Pinyin / Romaji / Revised Romanization for CJK. |
 
-## Recommended models
+> **Note — external prompt files disable features.** If `langhelper.ini` sets a
+> `PromptFile=` that points to an existing file (e.g. a `SKILL.md` /
+> `TeamsPrompt.md`), LangHelper runs in **raw/skill mode**: the whole file is
+> used verbatim and the **Features selection is ignored** by the backend. In
+> that mode the translator window greys out the **Configure features…** button
+> and labels the summary as *"Ignored — external prompt file in use"*. Clear
+> `PromptFile=` in the ini (and Reload) to return to the modular [prompt.md](prompt.md)
+> where the feature checkboxes take effect.
+
+## Settings (`langhelper.ini`)
+
+`langhelper.ini` is auto-created under `[LangHelper]` and updated whenever you
+change options in the translator window. Edit it by hand if you prefer, then
+tray → **Reload script** to apply.
+
+| Key | Values | Default | What it does |
+|---|---|---|---|
+| `Features` | comma-separated tags | `POLISH` | Enabled feature blocks (modular [prompt.md](prompt.md) mode only). |
+| `Model` | `gh models` id | `openai/gpt-4.1-mini` | Model passed to `gh models run`. |
+| `PromptFile` | file path or empty | *(empty)* | Points to an external prompt/spec (e.g. a `SKILL.md` / `TeamsPrompt.md`). When set and the file exists, LangHelper runs in raw/skill mode and **ignores `Features`**. Empty = bundled [prompt.md](prompt.md). |
+| `AutoTranslate` | `0` / `1` | `0` | Toggles the previously always-on live translation. `1` = re-translate automatically while you type (debounced ~700 ms). `0` = only translate on trigger (Ctrl+C, Ctrl+C) or **Re-translate**. Mirrors the **Auto-translate while typing** checkbox. |
+| `SingleWindow` | `0` / `1` | `1` | `1` = reuse one translator window (each trigger updates it in place). `0` = open a new window per trigger. Mirrors the **Single window (reuse)** checkbox. |
+
+
 
 Translation/polish is short-input, low-reasoning — small modern models give the
 best speed-per-quality. Avoid `o1*` / `o3*` / `o4*` / `deepseek-r1*` /
