@@ -64,12 +64,58 @@ winget install AutoHotkey.AutoHotkey        # v2.x
 | `Gui()` | 建立視窗的物件，LangHelper 的翻譯視窗與設定視窗都由它產生。 |
 
 
-## One-time setup
+## 從 0 開始設定 (Fresh setup)
+
+Run these steps once on a new Windows machine / VM. Open **PowerShell** from the
+project folder first:
 
 ```powershell
-winget install AutoHotkey.AutoHotkey        # v2.x
+cd C:\path\to\LangHelper
+```
+
+### 1. Install required tools
+
+LangHelper needs three command-line/runtime dependencies:
+
+| Tool | Why LangHelper needs it | Install |
+|---|---|---|
+| AutoHotkey v2 | Runs [langhelper.ahk](langhelper.ahk), listens for `Ctrl+C, Ctrl+C`, and shows the GUI. | `winget install AutoHotkey.AutoHotkey` |
+| GitHub CLI | Provides `gh auth` and `gh models run` for translation. | `winget install GitHub.cli` |
+| SQLite CLI (`sqlite3.exe`) | Stores and searches local translation history in `langhelper_history.sqlite`. | `winget install SQLite.SQLite` |
+
+Install all three:
+
+```powershell
+winget install AutoHotkey.AutoHotkey
 winget install GitHub.cli
-winget install SQLite.SQLite               # enables local searchable history
+winget install SQLite.SQLite
+```
+
+Close and reopen PowerShell after installation so `AutoHotkey64.exe`, `gh`, and
+`sqlite3` are available on `PATH`.
+
+### 2. Verify SQLite is installed
+
+History search depends on the SQLite command-line tool, not only the database
+file. Confirm this command works:
+
+```powershell
+sqlite3 --version
+```
+
+If PowerShell says `sqlite3` is not recognized, reinstall it and reopen
+PowerShell:
+
+```powershell
+winget install SQLite.SQLite
+```
+
+This is the same dependency checked by [langhelper-history.ps1](langhelper-history.ps1);
+without it, history insert/search will fail with `sqlite3.exe not found`.
+
+### 3. Sign in to GitHub Models
+
+```powershell
 gh auth login
 gh extension install github/gh-models
 ```
@@ -79,6 +125,17 @@ Verify the AI side works on its own:
 ```powershell
 "translate to english: 早安" | gh models run openai/gpt-4.1-mini
 ```
+
+### 4. Launch LangHelper
+
+Double-click [langhelper.ahk](langhelper.ahk), or run:
+
+```powershell
+AutoHotkey64.exe .\langhelper.ahk
+```
+
+A green "H" should appear in the Windows system tray. Select text anywhere,
+press **Ctrl+C, Ctrl+C**, and the translator window should open.
 
 ## Auto-start on login (recommended)
 
