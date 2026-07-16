@@ -550,7 +550,7 @@ CallBackend(text, features, model, dryRun) {
         . ' -InputFile "'  tmpIn  '"'
         . ' -OutputFile "' tmpOut '"'
     if (Trim(Settings["PromptFile"]) != "")
-        psArgs .= ' -PromptFile "' Settings["PromptFile"] '"'
+        psArgs .= ' -PromptFile ' PsArg(Settings["PromptFile"])
     if (dryRun)
         psArgs .= ' -DryRun'
 
