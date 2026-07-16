@@ -1,7 +1,7 @@
 #requires -Version 5.1
 [CmdletBinding()]
 param(
-    [ValidateSet('Insert', 'Search', 'Get')]
+    [ValidateSet('Insert', 'Search', 'Get', 'Delete', 'Clear')]
     [string]$Action = 'Search',
 
     [string]$DbPath,
@@ -138,5 +138,14 @@ SELECT hex(result) FROM history WHERE id = $Id;
         $resultHex = Invoke-SqliteScript $sql -Capture
         if ($resultHex -is [System.Array]) { $resultHex = $resultHex[0] }
         [System.IO.File]::WriteAllText($ResultOut, (ConvertFrom-HexUtf8 ([string]$resultHex)), $utf8NoBom)
+    }
+
+    'Delete' {
+        if ($Id -le 0) { throw 'A positive Id is required for Delete.' }
+        Invoke-SqliteScript "DELETE FROM history WHERE id = $Id;" | Out-Null
+    }
+
+    'Clear' {
+        Invoke-SqliteScript "DELETE FROM history;" | Out-Null
     }
 }

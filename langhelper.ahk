@@ -37,24 +37,32 @@ FeatureCatalog := [
 
 ModelCatalog := [
     "openai/gpt-4.1-mini",
+    "openai/gpt-5-chat",
     "openai/gpt-4.1-nano",
     "openai/gpt-4.1",
     "openai/gpt-4o-mini",
-    "openai/gpt-5-mini",
     "mistral-ai/mistral-small-2503",
     "meta/llama-3.3-70b-instruct"
 ]
 
 ; --- Settings (loaded from INI with defaults) --------------------------------
+; PromptFile: optional path to an external prompt/spec file (e.g. a SKILL.md /
+;             TeamsPrompt.md). Empty means use the bundled prompt.md.
 Settings := Map(
-    "Features", IniRead(IniPath, "LangHelper", "Features", "POLISH"),
-    "Model",    IniRead(IniPath, "LangHelper", "Model",    "openai/gpt-4.1-mini")
+    "Features",      IniRead(IniPath, "LangHelper", "Features",      "POLISH"),
+    "Model",         IniRead(IniPath, "LangHelper", "Model",         "openai/gpt-4.1-mini"),
+    "PromptFile",    IniRead(IniPath, "LangHelper", "PromptFile",    ""),
+    "AutoTranslate", IniRead(IniPath, "LangHelper", "AutoTranslate", "0"),
+    "SingleWindow",  IniRead(IniPath, "LangHelper", "SingleWindow",  "1")
 )
 
 SaveSettings() {
     global Settings, IniPath
-    IniWrite Settings["Features"], IniPath, "LangHelper", "Features"
-    IniWrite Settings["Model"],    IniPath, "LangHelper", "Model"
+    IniWrite Settings["Features"],      IniPath, "LangHelper", "Features"
+    IniWrite Settings["Model"],         IniPath, "LangHelper", "Model"
+    IniWrite Settings["PromptFile"],    IniPath, "LangHelper", "PromptFile"
+    IniWrite Settings["AutoTranslate"], IniPath, "LangHelper", "AutoTranslate"
+    IniWrite Settings["SingleWindow"],  IniPath, "LangHelper", "SingleWindow"
 }
 
 ; --- Tray menu ---------------------------------------------------------------
@@ -159,6 +167,18 @@ GetHistoryItem(id) {
     return { error: "", source: sourceText, result: resultText }
 }
 
+DeleteHistoryItem(id) {
+    global HistoryDbPath
+    args := '-Action Delete -DbPath ' PsArg(HistoryDbPath) ' -Id ' id
+    return RunHistoryCommand(args)
+}
+
+ClearHistory() {
+    global HistoryDbPath
+    args := '-Action Clear -DbPath ' PsArg(HistoryDbPath)
+    return RunHistoryCommand(args)
+}
+
 HexToText(hex) {
     hex := Trim(hex)
     if (hex = "")
@@ -228,6 +248,8 @@ ShowHistoryWindow() {
     lv := g.Add("ListView", "xm y+12 w840 h380 Grid", ["Time", "Source", "English", "Chinese", "Polished", "Other"])
     copyBtn := g.Add("Button", "xm y+10 w140", "Copy result")
     rerunBtn := g.Add("Button", "x+8 yp w150", "Re-run source")
+    deleteBtn := g.Add("Button", "x+8 yp w130", "Delete selected")
+    clearBtn := g.Add("Button", "x+8 yp w110", "Clear all")
     closeBtn := g.Add("Button", "x+408 yp w120", "Close")
 
     rowIds := []
@@ -326,6 +348,35 @@ ShowHistoryWindow() {
         ShowTranslatorWindow(item.source, true)
     }
 
+    DeleteSelected(*) {
+        id := GetSelectedId()
+        if (!id) {
+            SetStatus("Select a history item first.", "D97706")
+            return
+        }
+        if (MsgBox("Delete the selected history item? This cannot be undone.", "LangHelper", 0x4 | 0x30) != "Yes")
+            return
+        result := DeleteHistoryItem(id)
+        if (result.error != "") {
+            SetStatus(result.error, "DC2626")
+            return
+        }
+        LoadRows()
+        SetStatus("Item deleted.", "2563EB")
+    }
+
+    ClearAll(*) {
+        if (MsgBox("Delete ALL history items? This cannot be undone.", "LangHelper", 0x4 | 0x30) != "Yes")
+            return
+        result := ClearHistory()
+        if (result.error != "") {
+            SetStatus(result.error, "DC2626")
+            return
+        }
+        LoadRows()
+        SetStatus("History cleared.", "2563EB")
+    }
+
     Layout(clientW := 0, clientH := 0) {
         if (clientW <= 0 || clientH <= 0)
             g.GetClientPos(, , &clientW, &clientH)
@@ -341,6 +392,8 @@ ShowHistoryWindow() {
         lv.Move(margin, 114, width, Max(200, actionY - 124))
         copyBtn.Move(margin, actionY, 140, 30)
         rerunBtn.Move(margin + 150, actionY, 150, 30)
+        deleteBtn.Move(margin + 310, actionY, 130, 30)
+        clearBtn.Move(margin + 448, actionY, 110, 30)
         closeBtn.Move(margin + width - 120, actionY, 120, 30)
     }
 
@@ -350,6 +403,8 @@ ShowHistoryWindow() {
     openBtn.OnEvent("Click", OpenSelected)
     copyBtn.OnEvent("Click", CopySelectedResult)
     rerunBtn.OnEvent("Click", RerunSelected)
+    deleteBtn.OnEvent("Click", DeleteSelected)
+    clearBtn.OnEvent("Click", ClearAll)
     closeBtn.OnEvent("Click", (*) => g.Destroy())
     g.OnEvent("Escape", (*) => g.Destroy())
     g.OnEvent("Close", (*) => g.Destroy())
@@ -481,7 +536,7 @@ TriggerTranslation(dryRun) {
 
 ; --- Backend call (AHK -> PowerShell -> gh models run) ----------------------
 CallBackend(text, features, model, dryRun) {
-    global PsPath
+    global PsPath, Settings
     tmpIn  := A_Temp "\langhelper_in.txt"
     tmpOut := A_Temp "\langhelper_out.txt"
     tmpErr := A_Temp "\langhelper_err.txt"
@@ -494,6 +549,8 @@ CallBackend(text, features, model, dryRun) {
         . ' -Model "'    model    '"'
         . ' -InputFile "'  tmpIn  '"'
         . ' -OutputFile "' tmpOut '"'
+    if (Trim(Settings["PromptFile"]) != "")
+        psArgs .= ' -PromptFile ' PsArg(Settings["PromptFile"])
     if (dryRun)
         psArgs .= ' -DryRun'
 
@@ -538,11 +595,75 @@ FormatFeatures(featStr) {
     return out = "" ? featStr : out
 }
 
+; --- Split model output: first fenced code block vs the rest -----------------
+; Returns an object with .code (the primary result) and .notes (extra content).
+;   * Skill mode (TeamsPrompt.md etc.): .code = text of the first fenced code
+;     block, .notes = everything else.
+;   * Modular mode (prompt.md): output has no code fence but uses "## ..."
+;     section headings. .code = the first section's body, .notes = the
+;     remaining sections (kept with their headings).
+;   * Plain text (no fence, no headings): .code = "", .notes = full text.
+SplitResult(text) {
+    fence := Chr(96) Chr(96) Chr(96)            ; three backticks
+    pat   := "s)" fence "[^\r\n]*\R(.*?)\R" fence
+    if (RegExMatch(text, pat, &m)) {
+        code  := Trim(m[1], " `t`r`n")
+        notes := Trim(StrReplace(text, m[0], "", , , 1), " `t`r`n")
+        return { code: code, notes: notes }
+    }
+
+    ; No fenced block: split on Markdown "## " section headings if present.
+    if (RegExMatch(text, "m)^##[ \t]")) {
+        firstBody := ""
+        rest := ""
+        section := 0                            ; 0 = preamble, 1 = first section, 2+ = rest
+        for line in StrSplit(text, "`n", "`r") {
+            if (RegExMatch(line, "^##[ \t]")) {
+                section += 1
+                if (section >= 2)
+                    rest .= (rest = "" ? "" : "`n") line
+                continue                        ; drop the first heading line from the top box
+            }
+            if (section <= 1)
+                firstBody .= (firstBody = "" ? "" : "`n") line
+            else
+                rest .= (rest = "" ? "" : "`n") line
+        }
+        firstBody := Trim(firstBody, " `t`r`n")
+        rest := Trim(rest, " `t`r`n")
+        if (rest != "")
+            return { code: firstBody, notes: rest }
+    }
+
+    return { code: "", notes: text }
+}
+
+; --- Normalize line endings to CRLF so Win32 Edit controls (and pasted text)
+;     render line breaks. Model output often uses lone LF, which Edit ignores.
+ToCRLF(text) {
+    return StrReplace(StrReplace(text, "`r`n", "`n"), "`n", "`r`n")
+}
+
+; --- Whether a prompt file is "modular" (prompt.md-style with feature blocks).
+;     Mirrors langhelper.ps1: a file containing the clipboard marker is modular,
+;     so features still apply. Non-modular files (SKILL.md / TeamsPrompt.md) run
+;     in raw/skill mode where the Features selection is ignored.
+IsModularPromptFile(path) {
+    if (Trim(path) = "" || !FileExist(path))
+        return false
+    try {
+        content := FileRead(path, "UTF-8")
+    } catch {
+        return false
+    }
+    return InStr(content, "{{PASTE_CLIPBOARD_HERE}}") > 0
+}
+
 ShowTranslatorWindow(sourceText, autoRun) {
     global FeatureCatalog, ModelCatalog, Settings, LastResultPath, ActiveTranslator
 
-    ; Reuse the existing window if one is already open.
-    if (IsObject(ActiveTranslator)) {
+    ; Reuse the existing window when Single-window mode is on and one is open.
+    if (Settings["SingleWindow"] != "0" && IsObject(ActiveTranslator)) {
         try {
             ActiveTranslator.update.Call(sourceText, autoRun)
             return
@@ -568,7 +689,11 @@ ShowTranslatorWindow(sourceText, autoRun) {
     g.SetFont("s16 Bold", "Segoe UI")
     titleText := g.Add("Text", "x16 y14 c111827 BackgroundTrans", "LangHelper")
     g.SetFont("s9 Norm", "Segoe UI")
-    subtitleText := g.Add("Text", "x16 y40 c6B7280 BackgroundTrans", "Clipboard translator · edits re-translate automatically")
+    subtitleText := g.Add("Text", "x16 y40 c6B7280 BackgroundTrans", "Clipboard translator · Ctrl+C, Ctrl+C to translate")
+    singleChecked := (Settings["SingleWindow"] != "0") ? " Checked" : ""
+    singleWinChk := g.Add("CheckBox", "x600 y14 w236 Right" singleChecked, "Single window (reuse)")
+    autoChecked := (Settings["AutoTranslate"] = "1" || StrLower(Settings["AutoTranslate"]) = "true") ? " Checked" : ""
+    autoChk := g.Add("CheckBox", "x600 y38 w236 Right" autoChecked, "Auto-translate while typing")
 
     ; --- Source + model row --------------------------------------------------
     g.SetFont("s10 Bold", "Segoe UI")
@@ -595,17 +720,35 @@ ShowTranslatorWindow(sourceText, autoRun) {
     featuresLabel := g.Add("Text", "x84 y334 w560 c4B5563 BackgroundTrans", FormatFeatures(selectedFeatures))
     cfgBtn := g.Add("Button", "x654 y328 w182 h28", "&Configure features...")
 
+    ; An external prompt file only disables features when it runs in raw/skill
+    ; mode. A modular file (prompt.md-style, with the clipboard marker) still
+    ; honours features, so treat it the same as the default.
+    usingPromptFile := (Trim(Settings["PromptFile"]) != "" && FileExist(Settings["PromptFile"]) && !IsModularPromptFile(Settings["PromptFile"]))
+    if (usingPromptFile) {
+        promptFileName := ""
+        SplitPath(Settings["PromptFile"], &promptFileName)
+        cfgBtn.Enabled := false
+        featuresLabel.SetFont("cD97706")
+        featuresLabel.Value := "Ignored — external prompt file in use (" promptFileName ")"
+    }
+
     ; --- Status --------------------------------------------------------------
     statusText := g.Add("Text", "x16 y366 w820 c059669 BackgroundTrans", "Ready")
 
     ; --- Result --------------------------------------------------------------
     g.SetFont("s10 Bold", "Segoe UI")
-    resultHdr := g.Add("Text", "x16 y392 c374151 BackgroundTrans", "Result")
+    resultHdr := g.Add("Text", "x16 y392 c374151 BackgroundTrans", "Translation")
     g.SetFont("s9 Norm", "Segoe UI")
-    resultHint := g.Add("Text", "x72 y394 w350 c9CA3AF BackgroundTrans", "Auto-copied to clipboard after successful translation")
+    resultHint := g.Add("Text", "x110 y394 w330 c9CA3AF BackgroundTrans", "Code block — Copy result copies this")
     shortcutHint := g.Add("Text", "x430 y394 w406 c9CA3AF Right BackgroundTrans", "Alt+R re-translate · Alt+C copy · Esc close")
     g.SetFont("s10 Norm", "Segoe UI")
-    resultEdit := g.Add("Edit", "x16 y416 w820 h210 ReadOnly +Wrap")
+    resultEdit := g.Add("Edit", "x16 y416 w820 h110 ReadOnly +Wrap")
+
+    ; --- Notes ---------------------------------------------------------------
+    g.SetFont("s9 Norm", "Segoe UI")
+    notesHdr := g.Add("Text", "x16 y532 c9CA3AF BackgroundTrans", "Notes & back-translation")
+    g.SetFont("s10 Norm", "Segoe UI")
+    notesEdit := g.Add("Edit", "x16 y552 w820 h90 ReadOnly +Wrap")
 
     ; --- Actions -------------------------------------------------------------
     rerunBtn := g.Add("Button", "x16 y636 w150 h30 Default", "&Re-translate")
@@ -634,6 +777,7 @@ ShowTranslatorWindow(sourceText, autoRun) {
 
     SetResultPlaceholder(msg) {
         resultEdit.Value := msg
+        notesEdit.Value  := ""
     }
 
     SetBusy(busy) {
@@ -641,7 +785,7 @@ ShowTranslatorWindow(sourceText, autoRun) {
         rerunBtn.Enabled := !busy
         copyBtn.Enabled  := !busy
         ddModel.Enabled  := !busy
-        cfgBtn.Enabled   := !busy
+        cfgBtn.Enabled   := (!busy && !usingPromptFile)
     }
 
     Layout(clientW := 0, clientH := 0) {
@@ -657,6 +801,8 @@ ShowTranslatorWindow(sourceText, autoRun) {
 
         y := 14
         titleText.Move(margin, y)
+        singleWinChk.Move(margin + width - 236, y, 236)
+        autoChk.Move(margin + width - 236, y + 26, 236)
         y += 26
         subtitleText.Move(margin, y)
         y += 26
@@ -669,13 +815,13 @@ ShowTranslatorWindow(sourceText, autoRun) {
         ddModel.Move(margin + 48, y - 2, Min(360, width - 48))
         y += 30
 
-        inputH := Max(92, Round(clientH * 0.18))
+        inputH := Max(80, Round(clientH * 0.14))
         inputEdit.Move(margin, y, width, inputH)
         y += inputH + rowGap
 
         snapshotHdr.Move(margin, y)
         y += 20
-        snapshotH := Max(46, Round(clientH * 0.08))
+        snapshotH := Max(44, Round(clientH * 0.07))
         snapshotEdit.Move(margin, y, width, snapshotH)
         y += snapshotH + 10
 
@@ -689,16 +835,27 @@ ShowTranslatorWindow(sourceText, autoRun) {
         y += 26
 
         resultHdr.Move(margin, y)
-        resultHint.Move(margin + 56, y + 2, Min(350, width - 220))
+        resultHint.Move(margin + 94, y + 2, Min(330, width - 260))
         shortcutHint.Move(margin + width - 350, y + 2, 350)
         y += 24
 
         btnH := 30
         actionY := clientH - margin - btnH
-        resultH := actionY - y - rowGap
-        if (resultH < 120)
-            resultH := 120
+        ; Split the remaining vertical space: code block on top, notes below.
+        notesHdrH := 20
+        available := actionY - y - rowGap - notesHdrH - rowGap
+        if (available < 160)
+            available := 160
+        resultH := Max(80, Round(available * 0.42))
         resultEdit.Move(margin, y, width, resultH)
+        y += resultH + rowGap
+
+        notesHdr.Move(margin, y)
+        y += notesHdrH
+        notesH := actionY - y - rowGap
+        if (notesH < 80)
+            notesH := 80
+        notesEdit.Move(margin, y, width, notesH)
 
         rerunBtn.Move(margin, actionY, 150, btnH)
         copyBtn.Move(margin + 160, actionY, 140, btnH)
@@ -737,6 +894,7 @@ ShowTranslatorWindow(sourceText, autoRun) {
     }
 
     RunOnce(textToTranslate, feat, modl, seq) {
+        startTick := A_TickCount
         Log("Window translate  features=[" feat "]  model=" modl "  inputLen=" StrLen(textToTranslate))
         result := CallBackend(textToTranslate, feat, modl, false)
         Log("Window backend returned  exit=" result.exit "  outLen=" StrLen(result.output))
@@ -750,7 +908,8 @@ ShowTranslatorWindow(sourceText, autoRun) {
 
         if (result.error != "") {
             SetStatus("Error: see Open log file in tray", "DC2626")
-            resultEdit.Value := result.error
+            resultEdit.Value := ToCRLF(result.error)
+            notesEdit.Value  := ""
             return
         }
         if (result.output = "") {
@@ -758,15 +917,26 @@ ShowTranslatorWindow(sourceText, autoRun) {
             SetResultPlaceholder("The model returned an empty response.")
             return
         }
-        resultEdit.Value := result.output
-        A_Clipboard := result.output
+        split := SplitResult(result.output)
+        if (split.code != "") {
+            resultEdit.Value := ToCRLF(split.code)
+            notesEdit.Value  := ToCRLF(split.notes)
+            A_Clipboard      := ToCRLF(split.code)
+        } else {
+            resultEdit.Value := ToCRLF(result.output)
+            notesEdit.Value  := ""
+            A_Clipboard      := ToCRLF(result.output)
+        }
         try FileDelete LastResultPath
         FileAppend(result.output, LastResultPath, "UTF-8")
         SetTimer(() => RecordHistory(textToTranslate, result.output, feat, modl), -10)
-        SetStatus("Done. Result copied to clipboard.", "059669")
+        elapsed := (A_TickCount - startTick) / 1000
+        SetStatus("Done. Translation copied to clipboard. " Format("{:.3f}", elapsed) "s", "059669")
     }
 
     DebouncedTranslate(*) {
+        if (!autoChk.Value)
+            return
         state.seq += 1
         mySeq := state.seq
         SetTimer(() => DoTranslate(mySeq), -700)
@@ -775,6 +945,25 @@ ShowTranslatorWindow(sourceText, autoRun) {
     ForceTranslate(*) {
         state.seq += 1
         DoTranslate(state.seq)
+    }
+
+    OnAutoToggle(*) {
+        Settings["AutoTranslate"] := autoChk.Value ? "1" : "0"
+        SaveSettings()
+        if (autoChk.Value)
+            ForceTranslate()
+    }
+
+    OnSingleToggle(*) {
+        global ActiveTranslator
+        Settings["SingleWindow"] := singleWinChk.Value ? "1" : "0"
+        SaveSettings()
+        ; Turning single-window on makes this window the reuse target;
+        ; turning it off stops future triggers from reusing it.
+        if (singleWinChk.Value)
+            ActiveTranslator := { gui: g, update: UpdateWindow }
+        else if (IsObject(ActiveTranslator) && ActiveTranslator.gui = g)
+            ActiveTranslator := ""
     }
 
     OpenFeatureConfig(*) {
@@ -880,6 +1069,8 @@ ShowTranslatorWindow(sourceText, autoRun) {
 
     inputEdit.OnEvent("Change", DebouncedTranslate)
     inputEdit.OnEvent("Change", UpdateCharCount)
+    autoChk.OnEvent("Click", OnAutoToggle)
+    singleWinChk.OnEvent("Click", OnSingleToggle)
     cfgBtn.OnEvent("Click", OpenFeatureConfig)
     ddModel.OnEvent("Change", DebouncedTranslate)
 
@@ -911,7 +1102,8 @@ ShowTranslatorWindow(sourceText, autoRun) {
 
     DestroyWindow(*) {
         global ActiveTranslator
-        ActiveTranslator := ""
+        if (IsObject(ActiveTranslator) && ActiveTranslator.gui = g)
+            ActiveTranslator := ""
         g.Destroy()
     }
 
