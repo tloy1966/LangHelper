@@ -135,6 +135,9 @@ jobs:
                   $assembled.Contains('{{PASTE_CLIPBOARD_HERE}}')) {
                 throw "Clipboard was not preserved for features: $features"
               }
+              if ($assembled.Contains('## 潤飾後 (繁體中文)')) {
+                throw "Traditional Chinese must not have a polished section: $features"
+              }
 
               $selected = $features.Split(',')
               $hasGrammar = $selected -contains 'GRAMMAR'
@@ -147,7 +150,9 @@ jobs:
               if ($selected -contains 'POLISH') { $expected += '## Polished (English)' }
               if ($selected -contains 'BILINGUAL_EN_ZHTW') {
                 $expected += '## English', '## 繁體中文 (zh-TW)'
-                if ($selected -contains 'POLISH') { $expected += '## 潤飾後 (繁體中文)' }
+                if (-not $assembled.Contains('Chinese, reproduce it unchanged.')) {
+                  throw 'Bilingual output must preserve existing Traditional Chinese without polishing.'
+                }
               }
               if ($hasGrammar) {
                 foreach ($required in @(

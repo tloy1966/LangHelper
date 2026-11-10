@@ -51,6 +51,7 @@ Insert this block to make the output polished and professional.
 ```
 [FEATURE: POLISH]
 After translating to English, also produce a polished, professional version:
+- Polish English only; do not polish or rewrite the Traditional Chinese version.
 - Tone: clear, concise, confident, business-appropriate.
 - Fix grammar, awkward phrasing, redundancy, and filler words.
 - Keep the original intent and key facts; do not add new information.
@@ -80,15 +81,16 @@ reproduce it cleanly (fix obvious typos only).
 Traditional Chinese used in Taiwan. Use Taiwanese vocabulary and idioms
 (e.g. 軟體 not 软件, 程式 not 程序, 影片 not 视频, 滑鼠 not 鼠标).
 Never output Simplified characters. If the source is already Traditional
-Chinese, reproduce it cleanly.
+Chinese, reproduce it unchanged. Keep translations faithful to the source;
+do not polish or rewrite the Traditional Chinese version for style.
 
 NEVER omit either section. Both headings must appear in the output.
+Do not add a separate polished Traditional Chinese section.
 
-If [FEATURE: POLISH] is also enabled, polish BOTH language versions and add
-two more sections AFTER the two above:
+If [FEATURE: POLISH] is also enabled, add only the polished English version
+(once), without changing the Traditional Chinese version:
 
 ## Polished (English)
-## 潤飾後 (繁體中文)
 ```
 
 ---

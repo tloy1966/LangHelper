@@ -195,8 +195,8 @@ by accident.
 
 | Tag | What it does |
 |---|---|
-| `POLISH` | Adds `## Polished (English)` with a professional rewrite. |
-| `BILINGUAL_EN_ZHTW` | Forces both `## English` and `## 繁體中文 (zh-TW)` sections. Combines with POLISH to also produce polished versions of each. |
+| `POLISH` | Adds `## Polished (English)` with an English-only professional rewrite. Does not polish Traditional Chinese. |
+| `BILINGUAL_EN_ZHTW` | Forces both `## English` and `## 繁體中文 (zh-TW)` sections. With POLISH, adds only the polished English version; Traditional Chinese is not polished. |
 | `GRAMMAR` | 英文文法修正建議，並以臺灣繁體中文（zh-TW）逐項解釋修正原因。 |
 | `GLOSSARY` | 3–8 key terms with usage notes. |
 | `TONE_VARIANTS` | Formal / Friendly / Concise rewrites. |
@@ -205,6 +205,9 @@ by accident.
 | `TECHNICAL` | Preserves code, identifiers, paths, error messages. |
 | `BACK_TRANSLATE` | Back-translation sanity check + drift notes. |
 | `ROMANIZE` | Pinyin / Romaji / Revised Romanization for CJK. |
+
+繁體中文只提供忠實翻譯，不另加潤飾版本；原文已是繁體中文時保留原文。
+`POLISH` 只潤飾英文。
 
 > **Note — external prompt files disable features.** If `langhelper.ini` sets a
 > `PromptFile=` that points to a file without a `## Core` block (e.g. a
