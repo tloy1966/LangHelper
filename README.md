@@ -55,7 +55,7 @@ No AutoHotkey. No SQLite. No Azure. No API keys.
 Ctrl+C, Ctrl+C
    │
    ▼
-langhelper-tray.ps1  ──WM_CLIPBOARDUPDATE ×2 + Ctrl held──►  translator window
+langhelper-tray.ps1  ──global Ctrl+C keydown ×2───────────►  translator window
        │
        └── on feature change ──►  langhelper.ps1
                                     │  loads prompt.md
@@ -185,11 +185,10 @@ and exit.
 
 ### How the trigger works
 
-There is no keyboard hook. The tray app registers a Win32 clipboard listener
-(`AddClipboardFormatListener`) and treats *two clipboard updates inside
-`DoubleCopyMs`, with Ctrl still held* as the trigger. The Ctrl check is what
-keeps apps that write the clipboard twice on their own from opening the window
-by accident.
+The tray app registers a Win32 low-level keyboard hook and treats *two distinct
+Ctrl+C key presses inside `DoubleCopyMs`* as the trigger. Repeated clipboard
+notifications from a single copy operation therefore cannot open the window by
+accident.
 
 ## Features (defined in [prompt.md](prompt.md))
 
@@ -260,7 +259,7 @@ hand, then tray → **Reload config**.
 | `Provider` | `auto` / `vscode` / `copilot-cli` | `auto` | Which backend answers. See [Backends](#backends). |
 | `Features` | comma-separated tags | `POLISH,BILINGUAL_EN_ZHTW` | Enabled feature blocks (modular [prompt.md](prompt.md) mode only). Rewritten when you toggle a checkbox. |
 | `Model` | model name or empty | *(empty)* | `vscode`: a Copilot family such as `gpt-4o-mini`. `copilot-cli`: a `--model` value. Empty lets the provider pick. |
-| `DoubleCopyMs` | milliseconds | `700` | How close together the two clipboard updates must be to count as a double copy. |
+| `DoubleCopyMs` | milliseconds | `700` | How close together the two Ctrl+C key presses must be to count as a double copy. |
 | `MinChars` / `MaxChars` | integers | `1` / `8000` | Clipboard text outside this range is ignored (`MaxChars` truncates). |
 | `TimeoutSec` | seconds | `120` | How long to wait for the backend. |
 | `AutoCopyResult` | `0` / `1` | `0` | `1` puts the translation straight back on the clipboard. |
@@ -337,7 +336,7 @@ The checkbox appears on its own.
 | `No GitHub Copilot language model is available` | Sign in to Copilot in VS Code. **LangHelper: Show Bridge Log** has the detail. |
 | Translations suddenly take 30 s | The bridge went down and `auto` fell back to `copilot-cli`. Run with `-Verbose` to confirm, then reload VS Code. |
 | The result is the source text, unchanged | The model treated the input as already-English. Enable `BILINGUAL_EN_ZHTW` to force both sections. |
-| Ctrl+C, Ctrl+C does nothing | Copy twice *faster* than `DoubleCopyMs`, and keep Ctrl held for the second press — the Ctrl check is what filters out apps that write the clipboard on their own. Raise `DoubleCopyMs` if you need more slack. |
+| Ctrl+C, Ctrl+C does nothing | Press C twice while holding Ctrl, faster than `DoubleCopyMs`. Raise `DoubleCopyMs` if you need more slack. |
 | Two tray icons | Only one instance can run; the second exits with a message. Check `LangHelper.cmd` is not also in the Startup folder from an old install. |
 | Empty / garbled CJK output | Confirm [prompt.md](prompt.md) is saved as UTF-8 (no BOM). |
 | "Could not find Core block" | Don't rename the `## Core` heading or remove its fenced code block. |

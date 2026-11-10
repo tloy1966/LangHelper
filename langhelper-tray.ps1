@@ -7,9 +7,9 @@
     Replaces the AutoHotkey front end. Everything here is stock Windows
     PowerShell + WinForms, so the only thing you install is nothing.
 
-    Double-copy detection uses the Win32 clipboard listener
-    (AddClipboardFormatListener) rather than a keyboard hook: two clipboard
-    updates inside DoubleCopyMs, with Ctrl still held, means "translate this".
+    Double-copy detection uses a Win32 low-level keyboard hook: two distinct
+    Ctrl+C key presses inside DoubleCopyMs mean "translate this". Clipboard
+    text is read shortly after the second key press so the copy can complete.
 
     The translation itself goes to langhelper.ps1, which prefers the LangHelper
     Bridge extension in VS Code so the work is done by the Copilot models you
@@ -65,40 +65,71 @@ if (-not $script:Mutex.WaitOne(0)) {
     return
 }
 
-# --- Win32 clipboard listener --------------------------------------------------
-if (-not ('LangHelper.ClipboardWatcher' -as [type])) {
-    Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
+# --- Win32 Ctrl+C listener -----------------------------------------------------
+if (-not ('LangHelper.CopyShortcutWatcher' -as [type])) {
+    Add-Type -ReferencedAssemblies System, System.Windows.Forms, System.Drawing -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-using System.Windows.Forms;
 
 namespace LangHelper {
-    public class ClipboardWatcher : NativeWindow, IDisposable {
-        private const int WM_CLIPBOARDUPDATE = 0x031D;
-        public event EventHandler ClipboardUpdate;
+    public class CopyShortcutWatcher : IDisposable {
+        private const int WH_KEYBOARD_LL = 13;
+        private const int WM_KEYDOWN = 0x0100;
+        private const int WM_KEYUP = 0x0101;
+        private const int WM_SYSKEYDOWN = 0x0104;
+        private const int WM_SYSKEYUP = 0x0105;
+        private const int VK_C = 0x43;
+        private const int VK_CONTROL = 0x11;
 
-        [DllImport("user32.dll", SetLastError = true)] private static extern bool AddClipboardFormatListener(IntPtr hwnd);
-        [DllImport("user32.dll", SetLastError = true)] private static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
+        private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+        private readonly LowLevelKeyboardProc callback;
+        private IntPtr hook;
+        private bool cIsDown;
+
+        public event EventHandler CopyPressed;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc callback, IntPtr module, uint threadId);
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool UnhookWindowsHookEx(IntPtr hook);
+        [DllImport("user32.dll")]
+        private static extern IntPtr CallNextHookEx(IntPtr hook, int nCode, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vKey);
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern IntPtr GetModuleHandle(string moduleName);
 
-        public ClipboardWatcher() {
-            CreateHandle(new CreateParams());
-            AddClipboardFormatListener(Handle);
+        public CopyShortcutWatcher() {
+            callback = HookCallback;
+            hook = SetWindowsHookEx(WH_KEYBOARD_LL, callback, GetModuleHandle(null), 0);
+            if (hook == IntPtr.Zero) {
+                throw new InvalidOperationException("Unable to install keyboard hook. Win32 error " + Marshal.GetLastWin32Error());
+            }
         }
 
-        public static bool IsCtrlDown() { return (GetAsyncKeyState(0x11) & 0x8000) != 0; }
-
-        protected override void WndProc(ref Message m) {
-            if (m.Msg == WM_CLIPBOARDUPDATE) {
-                var h = ClipboardUpdate;
-                if (h != null) h(this, EventArgs.Empty);
+        private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
+            if (nCode >= 0) {
+                int message = wParam.ToInt32();
+                int key = Marshal.ReadInt32(lParam);
+                if (key == VK_C) {
+                    if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) {
+                        if (!cIsDown && (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) {
+                            var handler = CopyPressed;
+                            if (handler != null) handler(this, EventArgs.Empty);
+                        }
+                        cIsDown = true;
+                    } else if (message == WM_KEYUP || message == WM_SYSKEYUP) {
+                        cIsDown = false;
+                    }
+                }
             }
-            base.WndProc(ref m);
+            return CallNextHookEx(hook, nCode, wParam, lParam);
         }
 
         public void Dispose() {
-            RemoveClipboardFormatListener(Handle);
-            DestroyHandle();
+            if (hook != IntPtr.Zero) {
+                UnhookWindowsHookEx(hook);
+                hook = IntPtr.Zero;
+            }
         }
     }
 }
@@ -425,8 +456,8 @@ function Show-Translation {
     Start-Translation -Text $Text
 }
 
-# --- Clipboard trigger ---------------------------------------------------------
-$script:LastClipboardTick = [datetime]::MinValue
+# --- Double-copy trigger -------------------------------------------------------
+$script:LastCopyTick = [datetime]::MinValue
 $script:IgnoreClipboardUntil = [datetime]::MinValue
 
 function Get-ClipboardTextSafely {
@@ -439,20 +470,22 @@ function Get-ClipboardTextSafely {
     return ''
 }
 
-function Invoke-ClipboardTrigger {
+function Invoke-CopyShortcutTrigger {
     $now = Get-Date
     if ($now -lt $script:IgnoreClipboardUntil) { return }
 
     $window = [int]$script:Config.DoubleCopyMs
-    $isDouble = ($now - $script:LastClipboardTick).TotalMilliseconds -le $window
-    $script:LastClipboardTick = $now
+    $isDouble = ($now - $script:LastCopyTick).TotalMilliseconds -le $window
+    $script:LastCopyTick = $now
     if (-not $isDouble) { return }
+    $script:LastCopyTick = [datetime]::MinValue
 
-    # A real Ctrl+C, Ctrl+C still has Ctrl down; apps that write the clipboard
-    # twice on their own do not, which keeps the trigger from firing by accident.
-    if (-not [LangHelper.ClipboardWatcher]::IsCtrlDown()) { return }
-    $script:LastClipboardTick = [datetime]::MinValue
+    # Let the target application finish placing the second copy on the clipboard.
+    $script:CopyDelayTimer.Stop()
+    $script:CopyDelayTimer.Start()
+}
 
+function Invoke-CurrentClipboardTranslation {
     $text = Get-ClipboardTextSafely
     if (-not $text) { return }
     $trimmed = $text.Trim()
@@ -555,8 +588,15 @@ $tray.Add_MouseDoubleClick({
 })
 
 # --- Wire up and run -----------------------------------------------------------
-$watcher = New-Object LangHelper.ClipboardWatcher
-$watcher.add_ClipboardUpdate({ Invoke-ClipboardTrigger })
+$script:CopyDelayTimer = New-Object Windows.Forms.Timer
+$script:CopyDelayTimer.Interval = 120
+$script:CopyDelayTimer.Add_Tick({
+    $script:CopyDelayTimer.Stop()
+    Invoke-CurrentClipboardTranslation
+})
+
+$watcher = New-Object LangHelper.CopyShortcutWatcher
+$watcher.add_CopyPressed({ Invoke-CopyShortcutTrigger })
 
 # The backend runs in its own runspace; this pump moves the result onto the UI thread.
 $pump = New-Object Windows.Forms.Timer
@@ -567,6 +607,7 @@ $pump.Start()
 $context = New-Object Windows.Forms.ApplicationContext
 $miExit.Add_Click({
     $pump.Stop()
+    $script:CopyDelayTimer.Stop()
     Stop-Translation
     $tray.Visible = $false
     $tray.Dispose()
