@@ -106,3 +106,147 @@ jobs:
               throw "Reminder is missing a required section: $heading"
             }
           }
+
+      - name: Test English grammar feedback in zh-TW
+        shell: pwsh
+        run: |
+          $inputPath = Join-Path $env:RUNNER_TEMP 'grammar-input.txt'
+          $outputPath = Join-Path $env:RUNNER_TEMP 'grammar-output.txt'
+          $grammarHeadings = @('## 英文文法修正建議', '## 修正原因（繁體中文）')
+          $featureSets = @(
+            '', 'POLISH', 'BILINGUAL_EN_ZHTW', 'POLISH,BILINGUAL_EN_ZHTW',
+            'GRAMMAR', 'POLISH,GRAMMAR', 'BILINGUAL_EN_ZHTW,GRAMMAR',
+            'POLISH,BILINGUAL_EN_ZHTW,GRAMMAR'
+          )
+          $inputs = @(
+            'He go to school yesterday.',
+            'She goes to school every day.',
+            'Hello',
+            '這是一個測試。',
+            '我想說：He go to school yesterday.'
+          )
+          $caseCount = 0
+          foreach ($text in $inputs) {
+            [IO.File]::WriteAllText($inputPath, $text, [Text.UTF8Encoding]::new($false))
+            foreach ($features in $featureSets) {
+              .\langhelper.ps1 -Features $features -InputFile $inputPath -OutputFile $outputPath -DryRun -WarningAction Stop
+              $assembled = [IO.File]::ReadAllText($outputPath)
+              if (-not $assembled.Contains("<clipboard>`n$text`n</clipboard>") -or
+                  $assembled.Contains('{{PASTE_CLIPBOARD_HERE}}')) {
+                throw "Clipboard was not preserved for features: $features"
+              }
+
+              $selected = $features.Split(',')
+              $hasGrammar = $selected -contains 'GRAMMAR'
+              if ($assembled.Contains('[FEATURE: GRAMMAR]') -ne $hasGrammar) {
+                throw "GRAMMAR was not enabled/disabled correctly for features: $features"
+              }
+
+              $expected = @()
+              if ($hasGrammar) { $expected += $grammarHeadings }
+              if ($selected -contains 'POLISH') { $expected += '## Polished (English)' }
+              if ($selected -contains 'BILINGUAL_EN_ZHTW') {
+                $expected += '## English', '## 繁體中文 (zh-TW)'
+                if ($selected -contains 'POLISH') { $expected += '## 潤飾後 (繁體中文)' }
+              }
+              if ($hasGrammar) {
+                foreach ($required in @(
+                  '| 原文片段 | 修正建議 | 修正原因 |',
+                  '未發現需要修正的英文文法問題。',
+                  '非英文敘述翻成英文'
+                )) {
+                  if (-not $assembled.Contains($required)) {
+                    throw "Grammar instructions are missing: $required"
+                  }
+                }
+              }
+              $userPrompt = ($assembled -split '===== USER =====', 2)[1]
+              $sourceReminder = 'GRAMMAR SOURCE REMINDER:'
+              if ($userPrompt.Contains($sourceReminder) -ne $hasGrammar) {
+                throw "Grammar source reminder was not enabled/disabled correctly: $features"
+              }
+              if ($hasGrammar -and $userPrompt.IndexOf($sourceReminder) -le $userPrompt.LastIndexOf('</clipboard>')) {
+                throw 'Grammar source reminder must follow the original clipboard text.'
+              }
+              $reminder = [regex]::Match($userPrompt, 'in order: (.*?)\. Do not answer')
+              if ($reminder.Success -ne ($expected.Count -gt 0) -or
+                  $reminder.Groups[1].Value -cne ($expected -join ', ')) {
+                throw "Incorrect required sections for features: $features"
+              }
+              $caseCount++
+            }
+          }
+
+          $rawPromptPath = Join-Path $env:RUNNER_TEMP 'grammar-raw-prompt.md'
+          [IO.File]::WriteAllText($rawPromptPath, 'Summarize the clipboard in one sentence.', [Text.UTF8Encoding]::new($false))
+          .\langhelper.ps1 -PromptFile $rawPromptPath -Features 'GRAMMAR' -InputFile $inputPath -OutputFile $outputPath -DryRun
+          $rawPrompt = [IO.File]::ReadAllText($outputPath)
+          if ($rawPrompt.Contains('[FEATURE: GRAMMAR]') -or $rawPrompt.Contains('GRAMMAR SOURCE REMINDER:')) {
+            throw 'Raw prompt mode must continue to ignore feature selection.'
+          }
+
+          $modularPromptPath = Join-Path $env:RUNNER_TEMP 'grammar-core-only.md'
+          $bundled = [IO.File]::ReadAllText((Join-Path $PWD 'prompt.md')).Replace("`r`n", "`n")
+          $coreOnly = [regex]::Match($bundled, '(?ms)##\s+Core[^\n]*\n+```[a-z]*\n(.*?)\n```').Value
+          [IO.File]::WriteAllText($modularPromptPath, $coreOnly, [Text.UTF8Encoding]::new($false))
+          .\langhelper.ps1 -PromptFile $modularPromptPath -Features 'GRAMMAR' -InputFile $inputPath -OutputFile $outputPath -DryRun -WarningAction SilentlyContinue -WarningVariable missingFeatureWarning
+          $modularPrompt = [IO.File]::ReadAllText($outputPath)
+          if (@($missingFeatureWarning).Count -ne 1 -or $modularPrompt.Contains('GRAMMAR SOURCE REMINDER:')) {
+            throw 'An unavailable feature must be warned about and ignored, including its source reminder.'
+          }
+          Write-Host "Grammar prompt assembly passed ($caseCount modular cases + external-prompt compatibility)."
+
+      - name: Test translator window stacking
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $tokens = $null
+          $errors = $null
+          $ast = [Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'langhelper-tray.ps1'), [ref]$tokens, [ref]$errors
+          )
+          if ($errors.Count -gt 0) { throw 'Unable to parse the tray app.' }
+          $defaults = $ast.Find({
+            param($node)
+            $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+              $node.Left.Extent.Text -eq '$script:Defaults'
+          }, $true)
+          . ([scriptblock]::Create($defaults.Extent.Text))
+          foreach ($name in @('Read-Config', 'Save-Config', 'Get-PromptFeatures', 'Get-SelectedFeatures', 'New-TranslatorWindow')) {
+            $function = $ast.Find({
+              param($node)
+              $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
+            }, $true)
+            if (-not $function) { throw "Tray helper not found: $name" }
+            . ([scriptblock]::Create($function.Extent.Text))
+          }
+          $script:PromptPath = Join-Path $PWD 'prompt.md'
+          $script:Utf8 = [Text.UTF8Encoding]::new($false)
+          $script:IniPath = Join-Path $env:RUNNER_TEMP ("window-stacking-$([guid]::NewGuid().ToString('n')).ini")
+          $cases = @(
+            @{ Name = 'missing settings'; Content = $null; Expected = $false },
+            @{ Name = 'template'; Content = [IO.File]::ReadAllText((Join-Path $PWD 'langhelper.ini.example')); Expected = $false },
+            @{ Name = 'disabled'; Content = "[LangHelper]`nAlwaysOnTop=0"; Expected = $false },
+            @{ Name = 'opt-in'; Content = "[LangHelper]`nAlwaysOnTop=1"; Expected = $true }
+          )
+          try {
+            foreach ($case in $cases) {
+              if ($null -ne $case.Content) {
+                [IO.File]::WriteAllText($script:IniPath, $case.Content, [Text.Encoding]::Unicode)
+              }
+              $script:Config = Read-Config
+              $form = New-TranslatorWindow
+              try {
+                if ($form.TopMost -ne $case.Expected) {
+                  throw "Unexpected TopMost value for $($case.Name): $($form.TopMost)"
+                }
+              } finally { $form.Dispose() }
+              Save-Config $script:Config
+              if ((Read-Config).AlwaysOnTop -ne $script:Config.AlwaysOnTop) {
+                throw "Window stacking preference was not preserved: $($case.Name)"
+              }
+            }
+          } finally {
+            if (Test-Path -LiteralPath $script:IniPath) { Remove-Item -LiteralPath $script:IniPath -Force }
+          }
+          Write-Host 'Window stacking passed (default, template, disabled, opt-in and settings round-trip).'

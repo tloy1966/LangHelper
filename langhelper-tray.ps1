@@ -116,7 +116,7 @@ $script:Defaults = [ordered]@{
     MaxChars       = '8000'
     TimeoutSec     = '120'
     AutoCopyResult = '0'
-    AlwaysOnTop    = '1'
+    AlwaysOnTop    = '0'
 }
 
 function Read-Config {

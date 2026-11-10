@@ -50,10 +50,14 @@ jobs:
           $inputPath = Join-Path $env:RUNNER_TEMP 'input.txt'
           $outputPath = Join-Path $env:RUNNER_TEMP 'output.txt'
           [IO.File]::WriteAllText($inputPath, 'Release smoke test', [Text.UTF8Encoding]::new($false))
-          ./langhelper.ps1 -Features 'POLISH,BILINGUAL_EN_ZHTW' -InputFile $inputPath -OutputFile $outputPath -DryRun
+          ./langhelper.ps1 -Features 'POLISH,BILINGUAL_EN_ZHTW,GRAMMAR' -InputFile $inputPath -OutputFile $outputPath -DryRun
           $assembled = [IO.File]::ReadAllText($outputPath)
           if ($assembled.Contains('{{PASTE_CLIPBOARD_HERE}}') -or
               -not $assembled.Contains('[FEATURE: POLISH]') -or
+              -not $assembled.Contains('[FEATURE: GRAMMAR]') -or
+              -not $assembled.Contains('GRAMMAR SOURCE REMINDER:') -or
+              -not $assembled.Contains('## 英文文法修正建議') -or
+              -not $assembled.Contains('## 修正原因（繁體中文）') -or
               -not $assembled.Contains('Release smoke test')) {
             throw 'Prompt assembly smoke test failed.'
           }

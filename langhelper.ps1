@@ -20,7 +20,7 @@
                     credits), so it is a fallback rather than a default.
 
 .PARAMETER Features
-    Comma-separated feature names to enable (e.g. "POLISH,BILINGUAL_EN_ZHTW").
+    Comma-separated feature names to enable (e.g. "POLISH,BILINGUAL_EN_ZHTW,GRAMMAR").
     Empty string means Core-only (translate to English).
 
 .PARAMETER Model
@@ -113,6 +113,10 @@ if ($isModular) {
             ForEach-Object { $_.Trim() } |
             Where-Object   { $_ }
     }
+    # Check the source before generated translations can bias grammar feedback.
+    if ($selected -contains 'GRAMMAR') {
+        $selected = @('GRAMMAR') + @($selected | Where-Object { $_ -ne 'GRAMMAR' })
+    }
 
     $featureChunks = New-Object System.Collections.Generic.List[string]
     $missing       = New-Object System.Collections.Generic.List[string]
@@ -159,6 +163,13 @@ if ($isModular) {
         $headingList = $headings -join ', '
         $userPrompt = $userPrompt.TrimEnd() +
             "`n`nREMINDER: Even if the clipboard text above is short, you MUST still output every required section, in order: $headingList. Do not answer with a single line, and do not skip or merge any section. Do not add any other section."
+    }
+    if ($selected -contains 'GRAMMAR' -and $featureBlocks.ContainsKey('GRAMMAR')) {
+        $userPrompt = $userPrompt.TrimEnd() +
+            "`n`nGRAMMAR SOURCE REMINDER: Check the original English inside <clipboard>, resolving tense from time expressions before agreement, then recheck all corrections. " +
+            "In the corrected-text section, translate non-English prose to English and fix the original English. Preserve code, URLs and formatting; do not add bullets, quotes, code fences or commentary. " +
+            "Explain actual English corrections in Traditional Chinese (zh-TW), not changes made by another feature. Translation alone is not a grammar error. " +
+            "If no English grammar fixes are needed (including non-English-only input or valid single words), use the feature's no-issues notice."
     }
 }
 else {
